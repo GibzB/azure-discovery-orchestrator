@@ -1,5 +1,5 @@
 using '../main.bicep'
 
-param environmentName = 'prod'
+param env = 'prod'
 param location = 'eastus'
-param resourceGroupName = 'rg-azure-discovery-prod'
+param prefix = 'discoveryai'

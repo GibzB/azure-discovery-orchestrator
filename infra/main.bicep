@@ -1,117 +1,86 @@
-// Azure Discovery Orchestrator - Main Bicep Entry Point
-targetScope = 'subscription'
+targetScope = 'resourceGroup'
 
-@description('Environment name (dev, test, prod)')
-param environmentName string
+// ── Parameters ───────────────────────────────────────────────────────────────
+@description('Deployment environment (dev | test | prod)')
+@allowed(['dev', 'test', 'prod'])
+param env string = 'dev'
 
 @description('Primary Azure region')
-param location string = 'eastus'
+param location string = resourceGroup().location
 
-@description('Resource group name')
-param resourceGroupName string = 'rg-azure-discovery-${environmentName}'
+@description('Naming prefix for all resources')
+param prefix string = 'discoveryai'
 
-// Resource Group
-resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
-  name: resourceGroupName
-  location: location
-}
+// ── Modules ───────────────────────────────────────────────────────────────────
 
-// Modules
-module networking 'modules/networking/main.bicep' = {
-  scope: rg
-  name: 'networking'
+module monitor './modules/monitor/monitor.bicep' = {
+  name: 'monitorModule'
   params: {
-    environmentName: environmentName
+    prefix: prefix
+    env: env
     location: location
   }
 }
 
-module keyvault 'modules/keyvault/main.bicep' = {
-  scope: rg
-  name: 'keyvault'
+module storage './modules/storage/storage.bicep' = {
+  name: 'storageModule'
   params: {
-    environmentName: environmentName
+    prefix: prefix
+    env: env
     location: location
   }
 }
 
-module storage 'modules/storage/main.bicep' = {
-  scope: rg
-  name: 'storage'
+module keyvault './modules/keyvault/keyvault.bicep' = {
+  name: 'kvModule'
   params: {
-    environmentName: environmentName
+    prefix: prefix
+    env: env
     location: location
   }
 }
 
-module openai 'modules/openai/main.bicep' = {
-  scope: rg
-  name: 'openai'
+module openai './modules/openai/openai.bicep' = {
+  name: 'openaiModule'
   params: {
-    environmentName: environmentName
+    prefix: prefix
+    env: env
     location: location
   }
 }
 
-module speech 'modules/speech/main.bicep' = {
-  scope: rg
-  name: 'speech'
+module aiSearch './modules/ai-search/ai-search.bicep' = {
+  name: 'aiSearchModule'
   params: {
-    environmentName: environmentName
+    prefix: prefix
+    env: env
     location: location
   }
 }
 
-module aiSearch 'modules/ai-search/main.bicep' = {
-  scope: rg
-  name: 'ai-search'
+module cosmos './modules/cosmos/cosmos.bicep' = {
+  name: 'cosmosModule'
   params: {
-    environmentName: environmentName
+    prefix: prefix
+    env: env
     location: location
   }
 }
 
-module cosmos 'modules/cosmos/main.bicep' = {
-  scope: rg
-  name: 'cosmos'
+module containerApps './modules/containerapps/containerapps.bicep' = {
+  name: 'containerAppsModule'
   params: {
-    environmentName: environmentName
+    prefix: prefix
+    env: env
     location: location
+    logAnalyticsWorkspaceId: monitor.outputs.logAnalyticsWorkspaceId
+    logAnalyticsSharedKey: monitor.outputs.logAnalyticsSharedKey
   }
 }
 
-module sql 'modules/sql/main.bicep' = {
-  scope: rg
-  name: 'sql'
-  params: {
-    environmentName: environmentName
-    location: location
-  }
-}
-
-module containerApps 'modules/containerapps/main.bicep' = {
-  scope: rg
-  name: 'containerapps'
-  params: {
-    environmentName: environmentName
-    location: location
-  }
-}
-
-module monitor 'modules/monitor/main.bicep' = {
-  scope: rg
-  name: 'monitor'
-  params: {
-    environmentName: environmentName
-    location: location
-  }
-}
-
-module frontdoor 'modules/frontdoor/main.bicep' = {
-  scope: rg
-  name: 'frontdoor'
-  params: {
-    environmentName: environmentName
-    location: location
-  }
-}
+// ── Outputs ───────────────────────────────────────────────────────────────────
+output openAiEndpoint string = openai.outputs.endpoint
+output searchEndpoint string = aiSearch.outputs.endpoint
+output cosmosEndpoint string = cosmos.outputs.endpoint
+output containerAppFqdn string = containerApps.outputs.fqdn
+output appInsightsConnectionString string = monitor.outputs.appInsightsConnectionString
