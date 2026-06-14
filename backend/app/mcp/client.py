@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 LEARN_MCP_URL = "https://learn.microsoft.com/api/mcp"
 
 AZURE_MCP_PARAMS = StdioServerParameters(
-    command="npx",
-    args=["-y", "@azure/mcp@latest", "server", "start"],
+    command="azmcp",
+    args=["server", "start"],
     env=None,  # inherits process env — Azure CLI / DefaultAzureCredential chain
 )
 
