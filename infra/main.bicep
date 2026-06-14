@@ -92,6 +92,8 @@ output openAiEndpoint string = openai.outputs.endpoint
 output searchEndpoint string = aiSearch.outputs.endpoint
 output cosmosEndpoint string = cosmos.outputs.endpoint
 output containerAppFqdn string = containerApps.outputs.fqdn
+
+@secure()
 output appInsightsConnectionString string = monitor.outputs.appInsightsConnectionString
 output speechRegion string = speech.outputs.speechRegion
 output speechResourceName string = speech.outputs.speechName

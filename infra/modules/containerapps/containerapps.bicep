@@ -3,6 +3,8 @@ param prefix string
 param env string
 param location string
 param logAnalyticsWorkspaceId string
+
+@secure()
 param logAnalyticsSharedKey string
 
 @description('Container image to deploy — override in pipeline after build')

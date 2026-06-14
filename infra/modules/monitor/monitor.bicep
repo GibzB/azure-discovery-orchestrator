@@ -32,6 +32,10 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 // ── Outputs ───────────────────────────────────────────────────────────────────
 output logAnalyticsId string = logAnalytics.id
 output logAnalyticsWorkspaceId string = logAnalytics.properties.customerId
+
+@secure()
 output logAnalyticsSharedKey string = logAnalytics.listKeys().primarySharedKey
+
+@secure()
 output appInsightsConnectionString string = appInsights.properties.ConnectionString
-output appInsightsInstrumentationKey string = appInsights.properties.InstrumentationKey
+// appInsightsInstrumentationKey removed — duplicate secret, use ConnectionString instead
