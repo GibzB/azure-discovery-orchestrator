@@ -1,44 +1,60 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import VoiceConversation from '../components/VoiceConversation'
 import ChatWindow from '../components/ChatWindow'
 import ChatInput from '../components/ChatInput'
-import VoiceButton from '../components/VoiceButton'
 import { useChat } from '../hooks/useChat'
-import { useVoice } from '../hooks/useVoice'
+
+type Mode = 'voice' | 'text'
 
 export default function ChatPage() {
+  const [mode, setMode] = useState<Mode>('voice')
   const { messages, sendMessage, loading, sessionId } = useChat()
+  const navigate = useNavigate()
 
-  const voice = useVoice({
-    sessionId,
-    onError: (msg) => console.error('[voice]', msg),
-  })
+  const handleSessionComplete = () => {
+    navigate(`/reports/${sessionId}`)
+  }
 
   return (
     <main className="chat-page">
-      <header>
+      <header className="chat-page__header">
         <h1>Azure Discovery Orchestrator</h1>
-        <p>Describe your business — by text or voice — and we'll design the right Azure architecture.</p>
+        <p>AI-powered architecture discovery — speak naturally or type your answers.</p>
+
+        {/* Mode toggle */}
+        <div className="chat-page__mode-toggle" role="group" aria-label="Interaction mode">
+          <button
+            className={`mode-btn ${mode === 'voice' ? 'mode-btn--active' : ''}`}
+            onClick={() => setMode('voice')}
+            aria-pressed={mode === 'voice'}
+            type="button"
+          >
+            🎙 Voice
+          </button>
+          <button
+            className={`mode-btn ${mode === 'text' ? 'mode-btn--active' : ''}`}
+            onClick={() => setMode('text')}
+            aria-pressed={mode === 'text'}
+            type="button"
+          >
+            💬 Text
+          </button>
+        </div>
       </header>
 
-      <ChatWindow messages={messages} />
-
-      <div className="chat-page__input-row">
-        {/* Text input */}
-        <ChatInput onSend={sendMessage} disabled={loading || voice.state !== 'idle'} />
-
-        {/* Voice button — hold to speak */}
-        <VoiceButton
-          state={voice.state}
-          onStart={voice.startRecording}
-          onStop={voice.stopRecording}
-          onInterrupt={voice.stop}
-          disabled={loading}
+      {mode === 'voice' ? (
+        // ── Seamless voice conversation ──────────────────────────────────────
+        <VoiceConversation
+          sessionId={sessionId}
+          onComplete={handleSessionComplete}
         />
-      </div>
-
-      {voice.errorMessage && (
-        <p className="chat-page__voice-error" role="alert">
-          {voice.errorMessage}
-        </p>
+      ) : (
+        // ── Text fallback ────────────────────────────────────────────────────
+        <>
+          <ChatWindow messages={messages} />
+          <ChatInput onSend={sendMessage} disabled={loading} />
+        </>
       )}
     </main>
   )

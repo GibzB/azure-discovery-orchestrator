@@ -1,85 +1,189 @@
 """
-Voice route — speech-to-speech endpoint
+Voice routes
 
-POST /api/v1/voice/turn
-    Accepts:  multipart/form-data  { session_id: str, audio: UploadFile (WAV/MP3) }
-    Returns:  audio/mpeg  (MP3 of the assistant's spoken response)
+REST:
+  POST /api/v1/voice/start/{session_id}
+      → Returns MP3 of opening greeting (no audio input needed)
 
-The pipeline inside:
-    uploaded audio → STT → OrchestratorAgent → TTS → MP3 bytes
+  POST /api/v1/voice/turn/{session_id}
+      → Accepts audio upload, returns MP3 of next response
+
+  GET  /api/v1/voice/status/{session_id}
+      → Returns session status and turn count
+
+WebSocket:
+  WS   /api/v1/voice/ws/{session_id}
+      → Binary frames: client sends raw audio, server sends back MP3 chunks
+      → JSON control frames: {"type": "end"} to close gracefully
+
+The WebSocket path is the primary production interface — it enables the seamless
+continuous conversation loop where the client auto-listens after each response.
 """
 
-import tempfile
-from pathlib import Path
+import json
+import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
-from app.agents.orchestrator import OrchestratorAgent
-from app.services.speech_service import SpeechService
+from app.api.deps import get_conversation_service
+from app.services.conversation_service import ConversationService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-_speech = SpeechService()
-_agent = OrchestratorAgent()
 
+# ── REST: start session ───────────────────────────────────────────────────────
 
 @router.post(
-    "/turn",
+    "/start/{session_id}",
     response_class=Response,
-    responses={
-        200: {
-            "content": {"audio/mpeg": {}},
-            "description": "MP3 audio of the assistant's spoken response",
-        }
-    },
+    responses={200: {"content": {"audio/mpeg": {}}}},
+    summary="Start a discovery session — returns opening greeting as MP3",
+)
+async def start_session(
+    session_id: str,
+    svc: Annotated[ConversationService, Depends(get_conversation_service)],
+) -> Response:
+    audio = await svc.start_session(session_id)
+    if not audio:
+        raise HTTPException(500, "TTS returned no audio for opening message.")
+    return Response(content=audio, media_type="audio/mpeg")
+
+
+# ── REST: single turn ─────────────────────────────────────────────────────────
+
+@router.post(
+    "/turn/{session_id}",
+    response_class=Response,
+    responses={200: {"content": {"audio/mpeg": {}}}},
+    summary="Submit audio for one turn — returns next question as MP3",
 )
 async def voice_turn(
-    session_id: str = Form(...),
-    audio: UploadFile = Form(...),
+    session_id: str,
+    audio: UploadFile,
+    svc: Annotated[ConversationService, Depends(get_conversation_service)],
 ) -> Response:
-    """
-    Accepts an audio file (WAV or MP3), runs the full speech-to-speech
-    pipeline, and returns MP3 audio bytes.
-    """
-    # Validate mime type loosely
-    if audio.content_type not in ("audio/wav", "audio/wave", "audio/mpeg", "audio/mp3", "audio/webm"):
-        raise HTTPException(
-            status_code=415,
-            detail=f"Unsupported audio format: {audio.content_type}. Send audio/wav or audio/mpeg.",
-        )
+    allowed = {"audio/wav", "audio/wave", "audio/mpeg", "audio/mp3", "audio/webm", "audio/ogg"}
+    if audio.content_type not in allowed:
+        raise HTTPException(415, f"Unsupported audio format: {audio.content_type}")
 
-    # Save upload to a temp file for the Speech SDK
-    suffix = Path(audio.filename or "audio.wav").suffix or ".wav"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await audio.read())
-        tmp_path = tmp.name
+    audio_bytes = await audio.read()
+    from pathlib import Path
+    suffix = Path(audio.filename or "audio.webm").suffix or ".webm"
 
-    async def llm_fn(transcript: str) -> str:
-        return await _agent.run(user_input=transcript, context={"session_id": session_id})
+    mp3_bytes, _text, is_final = await svc.process_turn(session_id, audio_bytes, suffix)
 
-    audio_bytes = await _speech.speech_to_speech(
-        llm_fn=llm_fn,
-        audio_input_path=tmp_path,
-    )
+    if not mp3_bytes:
+        raise HTTPException(500, "Voice pipeline returned no audio.")
 
-    # Clean up temp file
-    Path(tmp_path).unlink(missing_ok=True)
-
-    if not audio_bytes:
-        raise HTTPException(status_code=500, detail="Speech pipeline returned no audio.")
-
-    return Response(content=audio_bytes, media_type="audio/mpeg")
+    headers = {"X-Session-Final": "true" if is_final else "false"}
+    return Response(content=mp3_bytes, media_type="audio/mpeg", headers=headers)
 
 
-@router.get("/voices")
-async def list_voices() -> dict:
-    """Return available TTS voices (static list for now)."""
+# ── REST: session status ──────────────────────────────────────────────────────
+
+@router.get("/status/{session_id}", summary="Get session status")
+async def session_status(
+    session_id: str,
+    svc: Annotated[ConversationService, Depends(get_conversation_service)],
+) -> dict:
+    session = svc.get_or_create_session(session_id)
     return {
-        "voices": [
-            {"name": "en-US-AvaMultilingualNeural", "language": "en-US", "default": True},
-            {"name": "en-US-AndrewMultilingualNeural", "language": "en-US"},
-            {"name": "en-GB-SoniaNeural", "language": "en-GB"},
-            {"name": "en-AU-NatashaNeural", "language": "en-AU"},
-        ]
+        "session_id": session_id,
+        "status": session.status,
+        "turn": session.turn,
+        "max_turns": session.max_turns,
     }
+
+
+# ── WebSocket: seamless continuous conversation ───────────────────────────────
+
+@router.websocket("/ws/{session_id}")
+async def voice_websocket(
+    websocket: WebSocket,
+    session_id: str,
+    svc: Annotated[ConversationService, Depends(get_conversation_service)],
+) -> None:
+    """
+    WebSocket voice conversation protocol:
+
+    Client → Server:
+      Binary frame:  raw audio bytes (WebM/WAV/MP3)
+      JSON text:     {"type": "start"}   — request opening greeting
+                     {"type": "end"}     — gracefully close session
+
+    Server → Client:
+      Binary frame:  MP3 audio chunk(s) for the current response
+      JSON text:     {"type": "turn_end", "is_final": bool, "turn": int}
+                     {"type": "error", "message": "..."}
+    """
+    await websocket.accept()
+    logger.info("[WS %s] Connected", session_id)
+
+    try:
+        while True:
+            # Receive next message (binary audio or JSON control)
+            message = await websocket.receive()
+
+            # ── Control frame ─────────────────────────────────────────────
+            if "text" in message:
+                try:
+                    data = json.loads(message["text"])
+                except json.JSONDecodeError:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                    continue
+
+                if data.get("type") == "start":
+                    # Kick off session — send opening greeting
+                    audio = await svc.start_session(session_id)
+                    if audio:
+                        await websocket.send_bytes(audio)
+                    session = svc.get_or_create_session(session_id)
+                    await websocket.send_text(json.dumps({
+                        "type": "turn_end",
+                        "is_final": False,
+                        "turn": session.turn,
+                    }))
+
+                elif data.get("type") == "end":
+                    svc.end_session(session_id)
+                    await websocket.send_text(json.dumps({"type": "session_ended"}))
+                    break
+
+            # ── Audio frame ───────────────────────────────────────────────
+            elif "bytes" in message:
+                audio_bytes: bytes = message["bytes"]
+                if not audio_bytes:
+                    continue
+
+                session = svc.get_or_create_session(session_id)
+
+                # Stream sentence-by-sentence for lower latency
+                async for chunk in svc.stream_turn(session_id, audio_bytes, ".webm"):
+                    await websocket.send_bytes(chunk)
+
+                session = svc.get_or_create_session(session_id)
+                is_final = session.status.value == "completed"
+
+                await websocket.send_text(json.dumps({
+                    "type": "turn_end",
+                    "is_final": is_final,
+                    "turn": session.turn,
+                }))
+
+                if is_final:
+                    break
+
+    except WebSocketDisconnect:
+        logger.info("[WS %s] Client disconnected", session_id)
+    except Exception as exc:
+        logger.error("[WS %s] Error: %s", session_id, exc, exc_info=True)
+        try:
+            await websocket.send_text(json.dumps({"type": "error", "message": str(exc)}))
+        except Exception:
+            pass
+    finally:
+        logger.info("[WS %s] Session closed at turn %d",
+                    session_id, svc.get_or_create_session(session_id).turn)

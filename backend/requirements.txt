@@ -1,12 +1,24 @@
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
+websockets==12.0
 pydantic==2.7.1
 pydantic-settings==2.3.1
+
+# Azure OpenAI + Identity
 openai==1.35.3
+azure-identity==1.17.1
+
+# MCP SDK (Microsoft Learn + Azure MCP servers)
+mcp==1.3.0
+
+# Azure services
 azure-cognitiveservices-speech==1.38.0
 azure-search-documents==11.6.0b4
 azure-cosmos==4.7.0
-azure-identity==1.17.1
 azure-storage-blob==12.20.0
+
+# HTTP client
 httpx==0.27.0
+
+# Multipart form uploads
 python-multipart==0.0.9

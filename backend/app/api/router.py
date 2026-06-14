@@ -1,5 +1,5 @@
 """
-API Router - aggregates all route groups
+API Router — aggregates all route groups
 """
 from fastapi import APIRouter
 
