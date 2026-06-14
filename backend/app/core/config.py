@@ -11,9 +11,10 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT: str = "gpt-4o"
     AZURE_OPENAI_API_VERSION: str = "2024-02-01"
 
-    # Azure Speech
+    # Azure Speech (STT + TTS — speech-to-speech pipeline)
     AZURE_SPEECH_KEY: str = ""
     AZURE_SPEECH_REGION: str = "eastus"
+    AZURE_SPEECH_VOICE: str = "en-US-AvaMultilingualNeural"
 
     # Azure AI Search
     SEARCH_ENDPOINT: str = ""

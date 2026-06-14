@@ -67,6 +67,15 @@ module cosmos './modules/cosmos/cosmos.bicep' = {
   }
 }
 
+module speech './modules/speech/speech.bicep' = {
+  name: 'speechModule'
+  params: {
+    prefix: prefix
+    env: env
+    location: location
+  }
+}
+
 module containerApps './modules/containerapps/containerapps.bicep' = {
   name: 'containerAppsModule'
   params: {
@@ -84,3 +93,5 @@ output searchEndpoint string = aiSearch.outputs.endpoint
 output cosmosEndpoint string = cosmos.outputs.endpoint
 output containerAppFqdn string = containerApps.outputs.fqdn
 output appInsightsConnectionString string = monitor.outputs.appInsightsConnectionString
+output speechRegion string = speech.outputs.speechRegion
+output speechResourceName string = speech.outputs.speechName
