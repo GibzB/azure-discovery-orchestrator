@@ -17,37 +17,37 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2023-10-01-preview' = {
   }
 }
 
-// GPT-4o deployment for chat
+// GPT-4.1 deployment for chat (GlobalStandard — available in italynorth)
 resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2023-10-01-preview' = {
   parent: openAi
-  name: 'gpt-4o'
+  name: 'gpt-4.1'
   sku: {
-    name: 'Standard'
-    capacity: 30 // TPM in thousands; adjust per quota
-  }
-  properties: {
-    model: {
-      format: 'OpenAI'
-      name: 'gpt-4o'
-      version: '2024-05-13'
-    }
-    versionUpgradeOption: 'OnceCurrentVersionExpired'
-  }
-}
-
-// text-embedding-ada-002 for RAG
-resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2023-10-01-preview' = {
-  parent: openAi
-  name: 'text-embedding-ada-002'
-  sku: {
-    name: 'Standard'
+    name: 'GlobalStandard'
     capacity: 30
   }
   properties: {
     model: {
       format: 'OpenAI'
-      name: 'text-embedding-ada-002'
-      version: '2'
+      name: 'gpt-4.1'
+      version: '2025-04-14'
+    }
+    versionUpgradeOption: 'OnceCurrentVersionExpired'
+  }
+}
+
+// text-embedding-3-small for RAG (GlobalStandard)
+resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2023-10-01-preview' = {
+  parent: openAi
+  name: 'text-embedding-3-small'
+  sku: {
+    name: 'GlobalStandard'
+    capacity: 30
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: 'text-embedding-3-small'
+      version: '1'
     }
     versionUpgradeOption: 'OnceCurrentVersionExpired'
   }
@@ -58,3 +58,5 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
 output endpoint string = openAi.properties.endpoint
 output openAiName string = openAi.name
 output openAiId string = openAi.id
+output chatDeployment string = gpt4oDeployment.name
+output embeddingDeployment string = embeddingDeployment.name

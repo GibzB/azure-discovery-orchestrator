@@ -1,5 +1,5 @@
 using '../main.bicep'
 
 param env = 'dev'
-param location = 'eastus'
+param location = 'italynorth'
 param prefix = 'discoveryai'

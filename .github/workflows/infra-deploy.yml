@@ -15,62 +15,70 @@ on:
         options: [dev, test, prod]
 
 permissions:
-  id-token: write   # required for OIDC login
+  id-token: write
   contents: read
 
 jobs:
   validate:
     name: Validate Bicep
     runs-on: ubuntu-latest
+    # environment required on job for OIDC subject matching
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Install Bicep CLI
+        run: az bicep install
+
       - name: Bicep lint
         run: az bicep lint --file infra/main.bicep
 
+      - name: Ensure resource group exists
+        # what-if fails if the RG doesn't exist — create it idempotently first
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          az group create \
+            --name "rg-discoveryai-${ENV}" \
+            --location italynorth \
+            --tags environment="${ENV}" project=azure-discovery-orchestrator
+
       - name: What-if (dry run)
         run: |
-          ENV=${{ github.event.inputs.environment || 'dev' }}
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
           az deployment group what-if \
-            --resource-group rg-discoveryai-${ENV} \
+            --resource-group "rg-discoveryai-${ENV}" \
             --template-file infra/main.bicep \
-            --parameters infra/environments/${ENV}.bicepparam
+            --parameters "infra/environments/${ENV}.bicepparam"
 
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
     needs: validate
     environment: ${{ github.event.inputs.environment || 'dev' }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure Login
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Ensure resource group exists
-        run: |
-          ENV=${{ github.event.inputs.environment || 'dev' }}
-          az group create \
-            --name rg-discoveryai-${ENV} \
-            --location eastus \
-            --tags environment=${ENV} project=azure-discovery-orchestrator
-
       - name: Deploy Bicep
         run: |
-          ENV=${{ github.event.inputs.environment || 'dev' }}
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
           az deployment group create \
-            --resource-group rg-discoveryai-${ENV} \
+            --resource-group "rg-discoveryai-${ENV}" \
             --template-file infra/main.bicep \
-            --parameters infra/environments/${ENV}.bicepparam \
-            --name deploy-$(date +%Y%m%d%H%M%S)
+            --parameters "infra/environments/${ENV}.bicepparam" \
+            --name "deploy-$(date +%Y%m%d%H%M%S)"

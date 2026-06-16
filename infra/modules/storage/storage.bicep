@@ -1,10 +1,13 @@
 // ── Storage Module ────────────────────────────────────────────────────────────
 param prefix string
+@minLength(1)
 param env string
 param location string
 
 // Storage account names: 3-24 chars, lowercase alphanumeric only
-var storageName = '${replace(prefix, '-', '')}st${env}'
+// substring ensures we never exceed 24 chars
+var rawName = '${replace(prefix, '-', '')}st${env}'
+var storageName = length(rawName) > 24 ? substring(rawName, 0, 24) : rawName
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   name: storageName
