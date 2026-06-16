@@ -67,6 +67,15 @@ module cosmos './modules/cosmos/cosmos.bicep' = {
   }
 }
 
+module aiServices './modules/aiservices/aiservices.bicep' = {
+  name: 'aiServicesModule'
+  params: {
+    prefix: prefix
+    env: env
+    location: location
+  }
+}
+
 module speech './modules/speech/speech.bicep' = {
   name: 'speechModule'
   params: {
@@ -89,6 +98,8 @@ module containerApps './modules/containerapps/containerapps.bicep' = {
 
 // ── Outputs ───────────────────────────────────────────────────────────────────
 output openAiEndpoint string = openai.outputs.endpoint
+output aiServicesEndpoint string = aiServices.outputs.endpoint
+output aiServicesChatDeployment string = aiServices.outputs.chatDeployment
 output searchEndpoint string = aiSearch.outputs.endpoint
 output cosmosEndpoint string = cosmos.outputs.endpoint
 output containerAppFqdn string = containerApps.outputs.fqdn
