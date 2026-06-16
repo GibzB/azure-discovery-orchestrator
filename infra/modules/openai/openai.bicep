@@ -11,52 +11,36 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2023-10-01-preview' = {
   kind: 'OpenAI'
   sku: { name: 'S0' }
   properties: {
-    publicNetworkAccess: 'Enabled' // API-key demo mode — no VNet required
+    publicNetworkAccess: 'Enabled'
     customSubDomainName: openAiName
     disableLocalAuth: false
+    networkAcls: {
+      defaultAction: 'Allow'
+      virtualNetworkRules: []
+      ipRules: []
+    }
   }
 }
 
-// GPT-4.1 deployment for chat (GlobalStandard — available in italynorth)
-resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2023-10-01-preview' = {
-  parent: openAi
-  name: 'gpt-4.1'
-  sku: {
-    name: 'GlobalStandard'
-    capacity: 30
-  }
-  properties: {
-    model: {
-      format: 'OpenAI'
-      name: 'gpt-4.1'
-      version: '2025-04-14'
-    }
-    versionUpgradeOption: 'OnceCurrentVersionExpired'
-  }
-}
-
-// text-embedding-3-small for RAG (GlobalStandard)
-resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2023-10-01-preview' = {
-  parent: openAi
-  name: 'text-embedding-3-small'
-  sku: {
-    name: 'GlobalStandard'
-    capacity: 30
-  }
-  properties: {
-    model: {
-      format: 'OpenAI'
-      name: 'text-embedding-3-small'
-      version: '1'
-    }
-    versionUpgradeOption: 'OnceCurrentVersionExpired'
-  }
-  dependsOn: [gpt4oDeployment]
-}
+// ── NOTE ──────────────────────────────────────────────────────────────────────
+// Model deployments are intentionally NOT declared here.
+// Azure for Students subscriptions require a quota request before deploying models.
+// After quota is approved, run:
+//   az cognitiveservices account deployment create \
+//     --resource-group rg-discoveryai-dev \
+//     --name discoveryai-oai-dev \
+//     --deployment-name gpt-4.1 \
+//     --model-name gpt-4.1 --model-version 2025-04-14 --model-format OpenAI \
+//     --sku-name GlobalStandard --sku-capacity 30
+//
+//   az cognitiveservices account deployment create \
+//     --resource-group rg-discoveryai-dev \
+//     --name discoveryai-oai-dev \
+//     --deployment-name text-embedding-3-small \
+//     --model-name text-embedding-3-small --model-version 1 --model-format OpenAI \
+//     --sku-name GlobalStandard --sku-capacity 30
 
 // ── Outputs ───────────────────────────────────────────────────────────────────
 output endpoint string = openAi.properties.endpoint
 output openAiName string = openAi.name
 output openAiId string = openAi.id
-output chatDeployment string = gpt4oDeployment.name
-output embeddingDeployment string = embeddingDeployment.name

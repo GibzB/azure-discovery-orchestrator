@@ -22,7 +22,7 @@ resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
         isZoneRedundant: false
       }
     ]
-    enableFreeTier: env == 'dev' ? true : false // free tier for dev only
+    enableFreeTier: false // free tier limited to 1 per subscription — set manually if needed
     publicNetworkAccess: 'Enabled' // API-key demo mode
     disableLocalAuth: false
     capabilities: [
