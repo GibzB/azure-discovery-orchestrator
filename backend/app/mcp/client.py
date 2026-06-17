@@ -20,7 +20,7 @@ from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.sse import sse_client
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,8 @@ class MCPClientManager:
 
     async def _connect_learn(self) -> None:
         try:
-            self._learn_ctx = streamablehttp_client(LEARN_MCP_URL)
-            read, write, _ = await self._learn_ctx.__aenter__()
+            self._learn_ctx = sse_client(LEARN_MCP_URL)
+            read, write = await self._learn_ctx.__aenter__()
             self._learn_session = ClientSession(read, write)
             await self._learn_session.__aenter__()
             await self._learn_session.initialize()

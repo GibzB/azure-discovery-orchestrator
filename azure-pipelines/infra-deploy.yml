@@ -1,0 +1,115 @@
+# Azure DevOps Pipeline — Infrastructure Deployment (Bicep)
+# Triggers on changes to infra/ on main branch
+# Requires: Azure Resource Manager service connection named 'azure-discoveryai-sc'
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include: [infra/*]
+
+pr: none
+
+parameters:
+  - name: environment
+    displayName: Target Environment
+    type: string
+    default: dev
+    values: [dev, test, prod]
+
+variables:
+  resourceGroup: 'rg-discoveryai-${{ parameters.environment }}'
+  location: 'italynorth'
+  serviceConnection: 'azure-discoveryai-sc'
+
+stages:
+  - stage: Validate
+    displayName: Validate Bicep
+    jobs:
+      - job: Lint
+        displayName: Lint & What-if
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: Install Bicep CLI
+            inputs:
+              azureSubscription: $(serviceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: az bicep install
+
+          - task: AzureCLI@2
+            displayName: Bicep lint
+            inputs:
+              azureSubscription: $(serviceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: az bicep lint --file infra/main.bicep
+
+          - task: AzureCLI@2
+            displayName: Ensure resource group exists
+            inputs:
+              azureSubscription: $(serviceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az group create \
+                  --name $(resourceGroup) \
+                  --location $(location) \
+                  --tags environment=${{ parameters.environment }} project=azure-discovery-orchestrator
+
+          - task: AzureCLI@2
+            displayName: What-if (dry run)
+            inputs:
+              azureSubscription: $(serviceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az deployment group what-if \
+                  --resource-group $(resourceGroup) \
+                  --template-file infra/main.bicep \
+                  --parameters infra/environments/${{ parameters.environment }}.bicepparam
+
+  - stage: Deploy
+    displayName: Deploy Infrastructure
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - deployment: DeployBicep
+        displayName: Deploy Bicep
+        pool:
+          vmImage: ubuntu-latest
+        environment: ${{ parameters.environment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: AzureCLI@2
+                  displayName: Deploy Bicep
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az deployment group create \
+                        --resource-group $(resourceGroup) \
+                        --template-file infra/main.bicep \
+                        --parameters infra/environments/${{ parameters.environment }}.bicepparam \
+                        --name "deploy-$(Build.BuildId)"
+
+                - task: AzureCLI@2
+                  displayName: Print deployment outputs
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az deployment group show \
+                        --resource-group $(resourceGroup) \
+                        --name "deploy-$(Build.BuildId)" \
+                        --query properties.outputs -o json

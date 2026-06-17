@@ -1,0 +1,61 @@
+# Azure DevOps Pipeline — Frontend Build & Deploy
+# Builds React/Vite app and deploys to Azure Static Web Apps
+# Requires:
+#   - Azure Resource Manager service connection: 'azure-discoveryai-sc'
+#   - Variable group: 'discoveryai-dev' with SWA_DEPLOYMENT_TOKEN, VITE_API_BASE_URL
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include: [frontend/*]
+
+pr: none
+
+parameters:
+  - name: environment
+    displayName: Target Environment
+    type: string
+    default: dev
+    values: [dev, test, prod]
+
+variables:
+  - group: discoveryai-${{ parameters.environment }}
+
+stages:
+  - stage: BuildDeploy
+    displayName: Build & Deploy Frontend
+    jobs:
+      - job: BuildDeployJob
+        displayName: Vite Build + SWA Deploy
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - task: NodeTool@0
+            displayName: Use Node 20
+            inputs:
+              versionSpec: '20.x'
+
+          - task: Npm@1
+            displayName: npm ci
+            inputs:
+              command: ci
+              workingDir: frontend
+
+          - task: Npm@1
+            displayName: npm run build
+            inputs:
+              command: custom
+              workingDir: frontend
+              customCommand: run build
+            env:
+              VITE_API_BASE_URL: $(VITE_API_BASE_URL)
+
+          - task: AzureStaticWebApp@0
+            displayName: Deploy to Static Web Apps
+            inputs:
+              app_location: frontend
+              output_location: dist
+              azure_static_web_apps_api_token: $(SWA_DEPLOYMENT_TOKEN)
