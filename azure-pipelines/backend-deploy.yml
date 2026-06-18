@@ -71,6 +71,20 @@ stages:
             deploy:
               steps:
                 - task: AzureCLI@2
+                  displayName: Attach ACR credentials to Container App
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az containerapp registry set \
+                        --name $(containerAppName) \
+                        --resource-group $(resourceGroup) \
+                        --server $(ACR_LOGIN_SERVER) \
+                        --username $(ACR_USERNAME) \
+                        --password $(ACR_PASSWORD)
+
+                - task: AzureCLI@2
                   displayName: Update Container App image
                   inputs:
                     azureSubscription: $(serviceConnection)
