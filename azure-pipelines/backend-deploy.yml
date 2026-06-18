@@ -45,21 +45,16 @@ stages:
           - checkout: self
 
           - task: Docker@2
-            displayName: Build image
+            displayName: Build & push to ACR
             inputs:
-              command: build
+              command: buildAndPush
+              containerRegistry: $(dockerConnection)
               repository: backend
               dockerfile: backend/Dockerfile
               buildContext: backend
-              tags: $(Build.SourceVersion)
-
-          - task: Docker@2
-            displayName: Push to ACR
-            inputs:
-              command: push
-              containerRegistry: $(dockerConnection)
-              repository: backend
-              tags: $(Build.SourceVersion)
+              tags: |
+                $(Build.SourceVersion)
+                latest
 
   - stage: Deploy
     displayName: Deploy to Container Apps
