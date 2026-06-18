@@ -32,20 +32,28 @@ logger = logging.getLogger(__name__)
 
 
 class SpeechService:
-    # ── Azure Neural voices ───────────────────────────────────────────────────
-    # Full list: https://learn.microsoft.com/azure/ai-services/speech-service/language-support
     DEFAULT_VOICE = "en-US-AvaMultilingualNeural"
 
     def __init__(self) -> None:
-        self._speech_config = speechsdk.SpeechConfig(
-            subscription=settings.AZURE_SPEECH_KEY,
-            region=settings.AZURE_SPEECH_REGION,
-        )
-        self._speech_config.speech_synthesis_voice_name = self.DEFAULT_VOICE
-        # Request compressed audio to reduce bandwidth (MP3 24kHz)
-        self._speech_config.set_speech_synthesis_output_format(
-            speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3
-        )
+        # Defer SDK initialization until first use — avoids crash if key is empty
+        self._speech_config: speechsdk.SpeechConfig | None = None
+
+    def _get_config(self) -> speechsdk.SpeechConfig:
+        """Lazily initialise the Speech SDK config on first use."""
+        if self._speech_config is None:
+            if not settings.AZURE_SPEECH_KEY:
+                raise RuntimeError("AZURE_SPEECH_KEY is not set — Speech SDK cannot initialise.")
+            self._speech_config = speechsdk.SpeechConfig(
+                subscription=settings.AZURE_SPEECH_KEY,
+                region=settings.AZURE_SPEECH_REGION,
+            )
+            self._speech_config.speech_synthesis_voice_name = (
+                settings.AZURE_SPEECH_VOICE or self.DEFAULT_VOICE
+            )
+            self._speech_config.set_speech_synthesis_output_format(
+                speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3
+            )
+        return self._speech_config
 
     # ── Speech-to-Text ────────────────────────────────────────────────────────
 
@@ -53,7 +61,7 @@ class SpeechService:
         """Transcribe a WAV/MP3 file to text. Returns empty string on failure."""
         audio_config = speechsdk.AudioConfig(filename=audio_path)
         recognizer = speechsdk.SpeechRecognizer(
-            speech_config=self._speech_config,
+            speech_config=self._get_config(),
             audio_config=audio_config,
         )
         result = recognizer.recognize_once_async().get()
@@ -71,48 +79,35 @@ class SpeechService:
         return ""
 
     def transcribe_microphone(self) -> str:
-        """
-        Transcribe a single microphone utterance (push-to-talk style).
-        Blocks until the utterance is complete or times out.
-        """
-        recognizer = speechsdk.SpeechRecognizer(speech_config=self._speech_config)
+        recognizer = speechsdk.SpeechRecognizer(speech_config=self._get_config())
         logger.info("Listening on microphone…")
         result = recognizer.recognize_once_async().get()
-
         if result.reason == speechsdk.ResultReason.RecognizedSpeech:
             return result.text
         return ""
 
-    # ── Text-to-Speech ────────────────────────────────────────────────────────
-
     def synthesise_to_file(self, text: str, output_path: str) -> bool:
-        """Synthesise text to an MP3 file. Returns True on success."""
         audio_config = speechsdk.AudioConfig(filename=output_path)
         synthesizer = speechsdk.SpeechSynthesizer(
-            speech_config=self._speech_config,
+            speech_config=self._get_config(),
             audio_config=audio_config,
         )
         result = synthesizer.speak_text_async(text).get()
-
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             logger.info("TTS saved to %s", output_path)
             return True
-
         details = result.cancellation_details
         logger.error("TTS failed: %s — %s", details.reason, details.error_details)
         return False
 
     def synthesise_to_bytes(self, text: str) -> bytes:
-        """Synthesise text and return raw audio bytes (MP3). Returns b'' on failure."""
         synthesizer = speechsdk.SpeechSynthesizer(
-            speech_config=self._speech_config,
-            audio_config=None,  # capture to memory
+            speech_config=self._get_config(),
+            audio_config=None,
         )
         result = synthesizer.speak_text_async(text).get()
-
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             return bytes(result.audio_data)
-
         details = result.cancellation_details
         logger.error("TTS failed: %s — %s", details.reason, details.error_details)
         return b""
