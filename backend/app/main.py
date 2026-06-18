@@ -1,6 +1,7 @@
 """
 Azure Discovery Orchestrator — FastAPI Entry Point
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -16,32 +17,40 @@ from app.services.conversation_service import ConversationService
 logging.basicConfig(level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
-# Module-level MCP manager (kept alive for app lifetime)
 _mcp: MCPClientManager | None = None
+
+
+async def _connect_mcp_background(mcp: MCPClientManager) -> None:
+    """Connect to MCP servers in the background — never blocks startup."""
+    try:
+        await asyncio.wait_for(mcp.start(), timeout=30.0)
+        logger.info("MCP connected in background: %d tools", len(mcp.all_tools_for_openai()))
+    except Exception as exc:
+        logger.warning("MCP background connect failed (non-fatal): %s", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _mcp
 
-    # ── Startup ───────────────────────────────────────────────────────────────
     logger.info("Starting Azure Discovery Orchestrator…")
 
-    # Connect to both MCP servers (non-fatal if unavailable)
+    # Create MCP manager and ConversationService immediately
     _mcp = MCPClientManager()
-    await _mcp.start()
-
-    # Wire ConversationService singleton (speech + agent + MCP)
     svc = ConversationService(mcp=_mcp)
     set_conversation_service(svc)
 
-    logger.info("All services ready.")
+    # Connect MCP in background — app is healthy before this completes
+    asyncio.create_task(_connect_mcp_background(_mcp))
+
+    logger.info("App ready — MCP connecting in background.")
     yield
 
-    # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Shutting down…")
-    if _mcp:
-        await _mcp.close()
+    try:
+        await asyncio.wait_for(_mcp.close(), timeout=5.0)
+    except Exception:
+        pass
 
 
 app = FastAPI(
