@@ -51,14 +51,14 @@ const BASE_WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://$
 
 export function useVoiceConversation({
   sessionId,
-  onMessage,
+  onMessage: _onMessage,
   onError,
   onComplete,
   silenceThresholdMs = 1800,
   maxRecordingMs = 30000,
 }: UseVoiceConversationOptions) {
   const [state, setState] = useState<ConvState>('disconnected')
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages] = useState<Message[]>([])
   const [turn, setTurn] = useState(0)
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -66,7 +66,6 @@ export function useVoiceConversation({
   const chunksRef = useRef<Blob[]>([])
   const audioQueueRef = useRef<Blob[]>([])
   const isPlayingRef = useRef(false)
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const maxDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const animFrameRef = useRef<number | null>(null)

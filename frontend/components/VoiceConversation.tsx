@@ -10,7 +10,6 @@
  *   completed     → checkmark
  *   error         → red
  */
-import { useEffect } from 'react'
 import { useVoiceConversation, type ConvState } from '../hooks/useVoiceConversation'
 
 interface VoiceConversationProps {
