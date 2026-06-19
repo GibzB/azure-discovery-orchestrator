@@ -22,13 +22,11 @@ jobs:
   validate:
     name: Validate Bicep
     runs-on: ubuntu-latest
-    # environment required on job for OIDC subject matching
     environment: ${{ github.event.inputs.environment || 'dev' }}
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure Login (OIDC)
+      - name: Azure Login (Workload Identity Federation)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -42,7 +40,6 @@ jobs:
         run: az bicep lint --file infra/main.bicep
 
       - name: Ensure resource group exists
-        # what-if fails if the RG doesn't exist — create it idempotently first
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           az group create \
@@ -63,11 +60,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     environment: ${{ github.event.inputs.environment || 'dev' }}
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure Login (OIDC)
+      - name: Azure Login (Workload Identity Federation)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}

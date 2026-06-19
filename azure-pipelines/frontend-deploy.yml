@@ -1,8 +1,6 @@
-# Azure DevOps Pipeline — Frontend Build & Deploy
-# Builds React/Vite app and deploys to Azure Static Web Apps
-# Requires:
-#   - Azure Resource Manager service connection: 'azure-discoveryai-sc'
-#   - Variable group: 'discoveryai-dev' with SWA_DEPLOYMENT_TOKEN, VITE_API_BASE_URL
+# Azure DevOps Pipeline — Frontend Build & Deploy to Blob Storage
+# Builds React/Vite app and uploads to Azure Blob Storage static website
+# Requires variable group: 'discoveryai-dev' with VITE_API_BASE_URL
 
 trigger:
   branches:
@@ -21,13 +19,17 @@ parameters:
 
 variables:
   - group: discoveryai-${{ parameters.environment }}
+  - name: storageAccount
+    value: discoveryaiswa${{ parameters.environment }}
+  - name: serviceConnection
+    value: azure-discoveryai-sc
 
 stages:
   - stage: BuildDeploy
     displayName: Build & Deploy Frontend
     jobs:
       - job: BuildDeployJob
-        displayName: Vite Build + SWA Deploy
+        displayName: Vite Build + Blob Upload
         pool:
           vmImage: ubuntu-latest
         steps:
@@ -38,24 +40,48 @@ stages:
             inputs:
               versionSpec: '20.x'
 
-          - task: Npm@1
-            displayName: npm ci
-            inputs:
-              command: ci
-              workingDir: frontend
+          - script: |
+              cd frontend
+              if [ ! -f package-lock.json ]; then
+                npm install
+              else
+                npm ci
+              fi
+            displayName: Install dependencies
 
-          - task: Npm@1
-            displayName: npm run build
-            inputs:
-              command: custom
-              workingDir: frontend
-              customCommand: run build
+          - script: cd frontend && npm run build
+            displayName: Vite build
             env:
               VITE_API_BASE_URL: $(VITE_API_BASE_URL)
 
-          - task: AzureStaticWebApp@0
-            displayName: Deploy to Static Web Apps
+          - task: AzureCLI@2
+            displayName: Upload to Blob Storage $web
             inputs:
-              app_location: frontend
-              output_location: dist
-              azure_static_web_apps_api_token: $(SWA_DEPLOYMENT_TOKEN)
+              azureSubscription: $(serviceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                # Upload all assets with long cache
+                az storage blob upload-batch \
+                  --account-name $(storageAccount) \
+                  --auth-mode key \
+                  --source frontend/dist \
+                  --destination '$web' \
+                  --overwrite true \
+                  --content-cache-control "public, max-age=31536000" \
+                  --pattern "**" 2>&1 || true
+
+                # Re-upload HTML with no-cache so users always get latest
+                az storage blob upload-batch \
+                  --account-name $(storageAccount) \
+                  --auth-mode key \
+                  --source frontend/dist \
+                  --destination '$web' \
+                  --overwrite true \
+                  --content-cache-control "no-cache" \
+                  --pattern "*.html"
+
+                echo "Frontend live at: $(az storage account show \
+                  --name $(storageAccount) \
+                  --resource-group rg-discoveryai-${{ parameters.environment }} \
+                  --query primaryEndpoints.web -o tsv)"

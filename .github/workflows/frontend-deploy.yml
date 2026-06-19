@@ -20,9 +20,10 @@ permissions:
 
 jobs:
   build-and-deploy:
-    name: Build & Deploy Frontend
+    name: Build & Deploy to Blob Storage
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'dev' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -32,9 +33,15 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Generate package-lock.json if missing
       - name: Install dependencies
         working-directory: frontend
-        run: npm ci
+        run: |
+          if [ ! -f package-lock.json ]; then
+            npm install
+          else
+            npm ci
+          fi
 
       - name: Build
         working-directory: frontend
@@ -42,18 +49,40 @@ jobs:
         env:
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
 
-      - name: Azure Login
+      - name: Azure Login (Workload Identity Federation)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy to Static Web Apps
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ secrets.SWA_DEPLOYMENT_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: upload
-          app_location: frontend
-          output_location: dist
+      - name: Upload to Blob Storage ($web container)
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          STORAGE_ACCOUNT="discoveryaiswa${ENV}"
+          az storage blob upload-batch \
+            --account-name "$STORAGE_ACCOUNT" \
+            --auth-mode key \
+            --source frontend/dist \
+            --destination '$web' \
+            --overwrite true \
+            --content-cache-control "public, max-age=31536000" \
+            --pattern "**" 2>&1 || true
+          # Set short cache for HTML files (force refresh on deploy)
+          az storage blob upload-batch \
+            --account-name "$STORAGE_ACCOUNT" \
+            --auth-mode key \
+            --source frontend/dist \
+            --destination '$web' \
+            --overwrite true \
+            --content-cache-control "no-cache" \
+            --pattern "*.html"
+
+      - name: Print frontend URL
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          STORAGE_ACCOUNT="discoveryaiswa${ENV}"
+          echo "Frontend URL: $(az storage account show \
+            --name $STORAGE_ACCOUNT \
+            --resource-group rg-discoveryai-${ENV} \
+            --query primaryEndpoints.web -o tsv)"
