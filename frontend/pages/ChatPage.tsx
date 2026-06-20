@@ -1,34 +1,37 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import VoiceConversation from '../components/VoiceConversation'
-import ChatWindow from '../components/ChatWindow'
-import ChatInput from '../components/ChatInput'
-import { useChat } from '../hooks/useChat'
+import TextChat from '../components/TextChat'
 
 type Mode = 'voice' | 'text'
 
 export default function ChatPage() {
   const [mode, setMode] = useState<Mode>('voice')
-  const { messages, sendMessage, loading, sessionId } = useChat()
+  const [sessionId] = useState(() => crypto.randomUUID())
   const navigate = useNavigate()
 
-  const handleSessionComplete = () => {
-    navigate(`/reports/${sessionId}`)
-  }
-
   return (
-    <main className="chat-page">
-      <header className="chat-page__header">
-        <h1>Azure Discovery Orchestrator</h1>
-        <p>AI-powered architecture discovery — speak naturally or type your answers.</p>
+    <>
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <header className="app-header">
+        <div className="brand">
+          <div className="brand-icon" aria-hidden="true">⬡</div>
+          <div>
+            <div className="brand-name">Azure Discovery Orchestrator</div>
+          </div>
+          <span className="brand-sub">— AI Architecture Discovery</span>
+        </div>
 
         {/* Mode toggle */}
-        <div className="chat-page__mode-toggle" role="group" aria-label="Interaction mode">
+        <div
+          className="mode-toggle"
+          role="group"
+          aria-label="Choose interaction mode"
+        >
           <button
             className={`mode-btn ${mode === 'voice' ? 'mode-btn--active' : ''}`}
             onClick={() => setMode('voice')}
             aria-pressed={mode === 'voice'}
-            type="button"
           >
             🎙 Voice
           </button>
@@ -36,26 +39,23 @@ export default function ChatPage() {
             className={`mode-btn ${mode === 'text' ? 'mode-btn--active' : ''}`}
             onClick={() => setMode('text')}
             aria-pressed={mode === 'text'}
-            type="button"
           >
             💬 Text
           </button>
         </div>
       </header>
 
-      {mode === 'voice' ? (
-        // ── Seamless voice conversation ──────────────────────────────────────
-        <VoiceConversation
-          sessionId={sessionId}
-          onComplete={handleSessionComplete}
-        />
-      ) : (
-        // ── Text fallback ────────────────────────────────────────────────────
-        <>
-          <ChatWindow messages={messages} />
-          <ChatInput onSend={sendMessage} disabled={loading} />
-        </>
-      )}
-    </main>
+      {/* ── Main ───────────────────────────────────────────────────────── */}
+      <main className="page-main">
+        {mode === 'voice' ? (
+          <VoiceConversation
+            sessionId={sessionId}
+            onComplete={() => navigate(`/reports/${sessionId}`)}
+          />
+        ) : (
+          <TextChat sessionId={sessionId} />
+        )}
+      </main>
+    </>
   )
 }

@@ -6,10 +6,10 @@ interface Message {
   content: string
 }
 
-export function useChat() {
+export function useChat(existingSessionId?: string) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
-  const [sessionId] = useState(() => crypto.randomUUID())
+  const [sessionId] = useState(() => existingSessionId ?? crypto.randomUUID())
 
   const sendMessage = useCallback(async (content: string) => {
     setMessages((prev) => [...prev, { role: 'user', content }])

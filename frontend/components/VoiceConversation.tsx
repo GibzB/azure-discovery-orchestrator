@@ -1,33 +1,12 @@
-/**
- * VoiceConversation — full-screen seamless voice discovery UI
- *
- * Shows a single ambient orb that pulses based on conversation state:
- *   disconnected  → flat grey ring  "Start Discovery"
- *   connecting    → slow pulse
- *   speaking      → animated wave (assistant is talking)
- *   listening     → bright green pulse (we're hearing you)
- *   processing    → rotating arc (thinking)
- *   completed     → checkmark
- *   error         → red
- */
 import { useVoiceConversation, type ConvState } from '../hooks/useVoiceConversation'
 
-interface VoiceConversationProps {
+interface Props {
   sessionId: string
   onComplete?: () => void
 }
 
-const STATE_LABEL: Record<ConvState, string> = {
-  disconnected: 'Press to start your discovery session',
-  connecting:   'Connecting…',
-  listening:    'Listening — speak now',
-  processing:   'Processing your answer…',
-  speaking:     'Azure Discovery Consultant is speaking',
-  completed:    'Session complete — your report is being prepared',
-  error:        'Something went wrong — please refresh',
-}
-
-const STATE_ICON: Record<ConvState, string> = {
+/* ── State → display mapping ──────────────────────────────────────────────── */
+const ICON: Record<ConvState, string> = {
   disconnected: '🎙',
   connecting:   '⟳',
   listening:    '👂',
@@ -37,58 +16,120 @@ const STATE_ICON: Record<ConvState, string> = {
   error:        '⚠',
 }
 
-export default function VoiceConversation({ sessionId, onComplete }: VoiceConversationProps) {
-  const { state, turn, connect, disconnect, isActive } = useVoiceConversation({
-    sessionId,
-    onComplete,
-    onError: (msg) => console.error('[voice]', msg),
-  })
+const LABEL: Record<ConvState, string> = {
+  disconnected: 'Press to start your discovery session',
+  connecting:   'Connecting…',
+  listening:    'Listening — speak now',
+  processing:   'Processing your answer…',
+  speaking:     'Azure Consultant is speaking',
+  completed:    'Session complete — your report is being prepared',
+  error:        'Something went wrong — please try again',
+}
 
-  const handleClick = () => {
-    if (state === 'disconnected' || state === 'error') {
-      connect()
-    } else if (isActive) {
-      disconnect()
-    }
+const STATUS_CLASS: Partial<Record<ConvState, string>> = {
+  listening: 'status-label--listening',
+  speaking:  'status-label--speaking',
+  error:     'status-label--error',
+}
+
+export default function VoiceConversation({ sessionId, onComplete }: Props) {
+  const { state, messages, turn, connect, disconnect, isActive } =
+    useVoiceConversation({ sessionId, onComplete })
+
+  const handleOrb = () => {
+    if (state === 'disconnected' || state === 'error') connect()
+    else if (state === 'speaking') disconnect()
   }
 
+  const isSpeaking = state === 'speaking'
+  const isListening = state === 'listening'
+
   return (
-    <div className="voice-conversation" aria-live="polite">
-      {/* Ambient orb */}
-      <button
-        className={`voice-orb voice-orb--${state}`}
-        onClick={handleClick}
-        aria-label={STATE_LABEL[state]}
-        aria-pressed={isActive}
-        disabled={state === 'connecting' || state === 'processing'}
-        type="button"
-      >
-        <span className="voice-orb__icon" aria-hidden="true">
-          {STATE_ICON[state]}
-        </span>
-      </button>
-
-      {/* State label */}
-      <p className="voice-conversation__label">{STATE_LABEL[state]}</p>
-
-      {/* Turn counter */}
-      {isActive && (
-        <p className="voice-conversation__turn" aria-label={`Turn ${turn}`}>
-          Turn {turn}
+    <>
+      {/* ── Hero card ────────────────────────────────────────────────── */}
+      <div className="hero-card">
+        <p className="hero-greeting">Azure Architecture Discovery</p>
+        <h1 className="hero-title">Your AI Consultant is ready</h1>
+        <p className="hero-subtitle">
+          Start a voice session and describe your business. Your consultant will
+          ask questions and design the right Azure architecture for you.
         </p>
-      )}
 
-      {/* Stop button when active */}
-      {isActive && (
-        <button
-          className="voice-conversation__stop"
-          onClick={disconnect}
-          aria-label="End session"
-          type="button"
-        >
-          End session
-        </button>
+        {/* Orb */}
+        <div className="orb-wrapper" aria-live="polite">
+          <div className={`orb-ring ${isSpeaking ? 'orb-ring--speaking' : isListening ? 'orb-ring--active' : ''}`} aria-hidden="true" />
+          <button
+            className={`orb-btn orb-btn--${state}`}
+            onClick={handleOrb}
+            aria-label={LABEL[state]}
+            aria-pressed={isActive}
+            disabled={state === 'connecting' || state === 'processing'}
+          >
+            {/* Waveform when speaking, icon otherwise */}
+            {isSpeaking ? (
+              <div className={`waveform waveform--speaking`} aria-hidden="true">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="waveform-bar" />
+                ))}
+              </div>
+            ) : (
+              <span className="orb-icon" aria-hidden="true">{ICON[state]}</span>
+            )}
+            {isActive && turn > 0 && (
+              <span className="orb-turn">Q{turn}</span>
+            )}
+          </button>
+        </div>
+
+        {/* Status */}
+        <p className={`status-label ${STATUS_CLASS[state] || ''}`}>
+          {LABEL[state]}
+        </p>
+
+        {/* CTA when idle */}
+        {(state === 'disconnected' || state === 'error') && (
+          <>
+            <button className="cta-btn" onClick={connect}>
+              <span>🎙</span> Start Discovery Session
+            </button>
+            <p className="cta-hint">
+              Hold Space to speak • Click orb to start
+            </p>
+          </>
+        )}
+
+        {/* End session when active */}
+        {isActive && (
+          <button className="end-btn" onClick={disconnect} aria-label="End session">
+            ✕ End Session
+          </button>
+        )}
+
+        {/* Error */}
+        {state === 'error' && (
+          <div className="error-banner" role="alert" style={{ marginTop: 16 }}>
+            ⚠ Connection lost. Check your microphone permissions and try again.
+          </div>
+        )}
+      </div>
+
+      {/* ── Live transcript ───────────────────────────────────────────── */}
+      {messages.length > 0 && (
+        <div className="transcript-card" aria-label="Conversation transcript" aria-live="polite">
+          <div className="transcript-header">
+            <span className="transcript-title">Live Transcript</span>
+            {isActive && <div className="rec-dot" aria-label="Recording" />}
+          </div>
+          <div className="transcript-body" id="transcript-body">
+            {messages.map((m, i) => (
+              <div key={i} className={`msg msg--${m.role}`}>
+                <span className="msg__role">{m.role === 'assistant' ? 'Consultant' : 'You'}</span>
+                <div className="msg__bubble">{m.text}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
-    </div>
+    </>
   )
 }
