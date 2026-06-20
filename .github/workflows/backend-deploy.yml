@@ -89,3 +89,26 @@ jobs:
             --resource-group "rg-discoveryai-${ENV}" \
             --query "{fqdn:properties.configuration.ingress.fqdn,state:properties.provisioningState}" \
             -o table
+
+      - name: Prune old ACR images (keep latest + 2 most recent SHAs)
+        run: |
+          # Get all SHA tags sorted newest-first, skip the 2 we want to keep
+          TAGS=$(az acr repository show-tags \
+            --name "${{ secrets.ACR_NAME }}" \
+            --repository backend \
+            --orderby time_desc \
+            --output tsv | grep -v '^latest$' | tail -n +3)
+
+          if [ -z "$TAGS" ]; then
+            echo "Nothing to prune."
+          else
+            echo "Pruning tags:"
+            echo "$TAGS"
+            while IFS= read -r tag; do
+              az acr repository delete \
+                --name "${{ secrets.ACR_NAME }}" \
+                --image "backend:${tag}" \
+                --yes 2>/dev/null && echo "  deleted: $tag" || echo "  skip: $tag"
+            done <<< "$TAGS"
+          fi
+          echo "✅ ACR pruned — keeping latest + 2 most recent SHAs"

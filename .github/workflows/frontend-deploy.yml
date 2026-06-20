@@ -25,21 +25,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Use Node 22 LTS — Node 20 is deprecated on GitHub runners
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      # Generate package-lock.json if missing
       - name: Install dependencies
         working-directory: frontend
-        run: |
-          if [ ! -f package-lock.json ]; then
-            npm install
-          else
-            npm ci
-          fi
+        run: npm ci
 
       - name: Build
         working-directory: frontend
@@ -47,40 +42,42 @@ jobs:
         env:
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
 
-      - name: Azure Login (Workload Identity Federation)
+      - name: Azure Login
         uses: azure/login@v2.3.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Upload to Blob Storage ($web container)
+      - name: Upload to Blob Storage
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           STORAGE_ACCOUNT="discoveryaiswa${ENV}"
+
+          # Assets — long cache (content-hashed filenames)
           az storage blob upload-batch \
             --account-name "$STORAGE_ACCOUNT" \
             --auth-mode key \
             --source frontend/dist \
             --destination '$web' \
             --overwrite true \
-            --content-cache-control "public, max-age=31536000" \
-            --pattern "**" 2>&1 || true
-          # Set short cache for HTML files (force refresh on deploy)
+            --content-cache-control "public, max-age=31536000, immutable" \
+            --pattern "assets/**"
+
+          # HTML — no cache so users always get the latest shell
           az storage blob upload-batch \
             --account-name "$STORAGE_ACCOUNT" \
             --auth-mode key \
             --source frontend/dist \
             --destination '$web' \
             --overwrite true \
-            --content-cache-control "no-cache" \
+            --content-cache-control "no-cache, no-store, must-revalidate" \
             --pattern "*.html"
 
-      - name: Print frontend URL
+      - name: Print URL
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"
-          STORAGE_ACCOUNT="discoveryaiswa${ENV}"
-          echo "Frontend URL: $(az storage account show \
-            --name $STORAGE_ACCOUNT \
+          echo "✅ Frontend: $(az storage account show \
+            --name discoveryaiswa${ENV} \
             --resource-group rg-discoveryai-${ENV} \
             --query primaryEndpoints.web -o tsv)"

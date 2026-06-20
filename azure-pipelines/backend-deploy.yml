@@ -106,3 +106,28 @@ stages:
                         --resource-group $(resourceGroup) \
                         --query "{fqdn:properties.configuration.ingress.fqdn, state:properties.provisioningState}" \
                         -o table
+
+                - task: AzureCLI@2
+                  displayName: Prune old ACR images (keep latest + 2 SHAs)
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      TAGS=$(az acr repository show-tags \
+                        --name $(ACR_NAME) \
+                        --repository backend \
+                        --orderby time_desc \
+                        --output tsv | grep -v '^latest$' | tail -n +3)
+                      if [ -z "$TAGS" ]; then
+                        echo "Nothing to prune."
+                      else
+                        echo "Pruning: $TAGS"
+                        while IFS= read -r tag; do
+                          az acr repository delete \
+                            --name $(ACR_NAME) \
+                            --image "backend:${tag}" \
+                            --yes 2>/dev/null && echo "  deleted: $tag" || true
+                        done <<< "$TAGS"
+                      fi
+                      echo "✅ ACR pruned — keeping latest + 2 most recent SHAs"
