@@ -69,7 +69,8 @@ stages:
             deploy:
               steps:
                 - task: AzureCLI@2
-                  displayName: Attach ACR credentials to Container App
+                  displayName: Attach ACR credentials (idempotent, non-fatal)
+                  continueOnError: true
                   inputs:
                     azureSubscription: $(serviceConnection)
                     scriptType: bash
@@ -81,6 +82,26 @@ stages:
                         --server $(ACR_LOGIN_SERVER) \
                         --username $(ACR_USERNAME) \
                         --password $(ACR_PASSWORD)
+
+                - task: AzureCLI@2
+                  displayName: Wait for Container App ready
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo "Waiting for any in-progress operation to complete..."
+                      for i in $(seq 1 12); do
+                        STATE=$(az containerapp show \
+                          --name $(containerAppName) \
+                          --resource-group $(resourceGroup) \
+                          --query "properties.provisioningState" -o tsv 2>/dev/null)
+                        echo "  Attempt $i: provisioningState=$STATE"
+                        if [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ]; then
+                          break
+                        fi
+                        sleep 10
+                      done
 
                 - task: AzureCLI@2
                   displayName: Update Container App image
