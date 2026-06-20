@@ -5,8 +5,6 @@
 trigger:
   branches:
     include: [main]
-  paths:
-    include: [infra/*]
 
 pr: none
 
