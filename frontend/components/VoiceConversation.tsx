@@ -5,122 +5,158 @@ interface Props {
   onComplete?: () => void
 }
 
-/* ── State → display mapping ──────────────────────────────────────────────── */
-const ICON: Record<ConvState, string> = {
-  disconnected: '🎙',
-  connecting:   '⟳',
-  listening:    '👂',
-  processing:   '⟳',
-  speaking:     '🔊',
-  completed:    '✓',
-  error:        '⚠',
+const ORB_ICON: Record<ConvState, string> = {
+  disconnected: '🎙', connecting: '⟳',
+  listening: '👂', processing: '⟳',
+  speaking: '🔊', completed: '✓', error: '⚠',
 }
 
-const LABEL: Record<ConvState, string> = {
-  disconnected: 'Press to start your discovery session',
-  connecting:   'Connecting…',
+const STATUS_TEXT: Record<ConvState, string> = {
+  disconnected: 'Ready to begin your discovery session',
+  connecting:   'Connecting to your AI consultant…',
   listening:    'Listening — speak now',
-  processing:   'Processing your answer…',
-  speaking:     'Azure Consultant is speaking',
-  completed:    'Session complete — your report is being prepared',
-  error:        'Something went wrong — please try again',
+  processing:   'Processing your response…',
+  speaking:     'Your consultant is speaking',
+  completed:    'Session complete — preparing your report',
+  error:        'Connection lost — please try again',
 }
 
 const STATUS_CLASS: Partial<Record<ConvState, string>> = {
-  listening: 'status-label--listening',
-  speaking:  'status-label--speaking',
-  error:     'status-label--error',
+  listening: 'orb-label--listening',
+  speaking:  'orb-label--speaking',
+  completed: 'orb-label--completed',
+  error:     'orb-label--error',
 }
 
-export default function VoiceConversation({ sessionId, onComplete }: Props) {
+const PHASES = ['Business', 'Technical', 'Compliance', 'Report']
+
+export default function VoiceConversation({ sessionId: _sessionId, onComplete }: Props) {
   const { state, messages, turn, connect, disconnect, isActive } =
-    useVoiceConversation({ sessionId, onComplete })
+    useVoiceConversation({ sessionId: _sessionId, onComplete })
 
-  const handleOrb = () => {
-    if (state === 'disconnected' || state === 'error') connect()
-    else if (state === 'speaking') disconnect()
-  }
-
+  const phase = Math.min(Math.floor((turn - 1) / 4), 3)
   const isSpeaking = state === 'speaking'
   const isListening = state === 'listening'
+  const isIdle = state === 'disconnected' || state === 'error'
 
   return (
     <>
-      {/* ── Hero card ────────────────────────────────────────────────── */}
-      <div className="hero-card">
-        <p className="hero-greeting">Azure Architecture Discovery</p>
-        <h1 className="hero-title">Your AI Consultant is ready</h1>
-        <p className="hero-subtitle">
-          Start a voice session and describe your business. Your consultant will
-          ask questions and design the right Azure architecture for you.
-        </p>
-
-        {/* Orb */}
-        <div className="orb-wrapper" aria-live="polite">
-          <div className={`orb-ring ${isSpeaking ? 'orb-ring--speaking' : isListening ? 'orb-ring--active' : ''}`} aria-hidden="true" />
-          <button
-            className={`orb-btn orb-btn--${state}`}
-            onClick={handleOrb}
-            aria-label={LABEL[state]}
-            aria-pressed={isActive}
-            disabled={state === 'connecting' || state === 'processing'}
-          >
-            {/* Waveform when speaking, icon otherwise */}
-            {isSpeaking ? (
-              <div className={`waveform waveform--speaking`} aria-hidden="true">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="waveform-bar" />
-                ))}
-              </div>
-            ) : (
-              <span className="orb-icon" aria-hidden="true">{ICON[state]}</span>
-            )}
-            {isActive && turn > 0 && (
-              <span className="orb-turn">Q{turn}</span>
-            )}
-          </button>
-        </div>
-
-        {/* Status */}
-        <p className={`status-label ${STATUS_CLASS[state] || ''}`}>
-          {LABEL[state]}
-        </p>
-
-        {/* CTA when idle */}
-        {(state === 'disconnected' || state === 'error') && (
-          <>
-            <button className="cta-btn" onClick={connect}>
-              <span>🎙</span> Start Discovery Session
-            </button>
-            <p className="cta-hint">
-              Hold Space to speak • Click orb to start
-            </p>
-          </>
-        )}
-
-        {/* End session when active */}
-        {isActive && (
-          <button className="end-btn" onClick={disconnect} aria-label="End session">
-            ✕ End Session
-          </button>
-        )}
-
-        {/* Error */}
-        {state === 'error' && (
-          <div className="error-banner" role="alert" style={{ marginTop: 16 }}>
-            ⚠ Connection lost. Check your microphone permissions and try again.
+      <div className="glass-card">
+        <div className="hero-section">
+          {/* Badge */}
+          <div className="hero-badge">
+            <span>✦</span> AI Architecture Discovery
           </div>
-        )}
+
+          {/* Title */}
+          <h1 className="hero-title">
+            Meet your Azure<br />Solutions Architect
+          </h1>
+          <p className="hero-sub">
+            Speak naturally about your business. Your AI consultant will ask
+            focused questions and design the right Azure architecture for you —
+            all in a single conversation.
+          </p>
+
+          {/* Feature pills */}
+          <div className="features">
+            {[
+              { icon: '🎙', label: 'Voice-first' },
+              { icon: '🧠', label: 'GPT-4.1 powered' },
+              { icon: '📋', label: 'Instant report' },
+              { icon: '🔒', label: 'Enterprise secure' },
+            ].map(f => (
+              <div key={f.label} className="feature-pill">
+                <span className="feature-pill-icon">{f.icon}</span> {f.label}
+              </div>
+            ))}
+          </div>
+
+          {/* Phase steps — only show during session */}
+          {isActive && (
+            <div className="steps" aria-label="Discovery phases">
+              {PHASES.map((p, i) => (
+                <>
+                  {i > 0 && <div key={`line-${i}`} className="step-line" />}
+                  <div
+                    key={p}
+                    className={`step${i === phase ? ' step--active' : i < phase ? ' step--done' : ''}`}
+                    aria-current={i === phase ? 'step' : undefined}
+                  >
+                    <div className="step-num">{i < phase ? '✓' : i + 1}</div>
+                    <div className="step-label">{p}</div>
+                  </div>
+                </>
+              ))}
+            </div>
+          )}
+
+          {/* Orb */}
+          <div className="orb-container" aria-live="polite" aria-atomic="true">
+            <div className={`orb-ring orb-ring-1${isListening ? ' orb-ring--listening' : isSpeaking ? ' orb-ring--speaking' : ''}`} aria-hidden="true" />
+            <div className={`orb-ring orb-ring-2${isListening ? ' orb-ring--listening' : isSpeaking ? ' orb-ring--speaking' : ''}`} aria-hidden="true" />
+
+            <button
+              className={`orb-btn orb-btn--${state}`}
+              onClick={() => isIdle ? connect() : state === 'speaking' ? disconnect() : undefined}
+              aria-label={STATUS_TEXT[state]}
+              aria-pressed={isActive}
+              disabled={state === 'connecting' || state === 'processing'}
+            >
+              {isSpeaking ? (
+                <div className="waveform waveform--active" aria-hidden="true">
+                  {[...Array(5)].map((_, i) => <div key={i} className="waveform-bar" />)}
+                </div>
+              ) : (
+                <span className="orb-icon" aria-hidden="true">{ORB_ICON[state]}</span>
+              )}
+              {isActive && turn > 0 && (
+                <div className="orb-pill">Q{turn}</div>
+              )}
+            </button>
+          </div>
+
+          {/* Status */}
+          <p className={`orb-label ${STATUS_CLASS[state] || ''}`}>
+            {STATUS_TEXT[state]}
+          </p>
+
+          {/* CTA / controls */}
+          <div className="cta-group">
+            {isIdle && (
+              <>
+                <button className="cta-primary" onClick={connect}>
+                  <span>🎙</span> Start Discovery Session
+                </button>
+                <p className="cta-hint">
+                  Click the orb or press <kbd>Space</kbd> to begin
+                </p>
+              </>
+            )}
+            {isActive && (
+              <button className="end-btn" onClick={disconnect}>
+                ✕ End Session
+              </button>
+            )}
+          </div>
+
+          {/* Error */}
+          {state === 'error' && (
+            <div className="error-alert" role="alert">
+              ⚠ Check your microphone permissions and network connection, then try again.
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* ── Live transcript ───────────────────────────────────────────── */}
+      {/* Live transcript */}
       {messages.length > 0 && (
-        <div className="transcript-card" aria-label="Conversation transcript" aria-live="polite">
+        <div className="transcript-card" aria-label="Live conversation transcript">
           <div className="transcript-header">
             <span className="transcript-title">Live Transcript</span>
-            {isActive && <div className="rec-dot" aria-label="Recording" />}
+            {isActive && <div className="rec-dot" aria-label="Recording in progress" />}
           </div>
-          <div className="transcript-body" id="transcript-body">
+          <div className="transcript-body">
             {messages.map((m, i) => (
               <div key={i} className={`msg msg--${m.role}`}>
                 <span className="msg__role">{m.role === 'assistant' ? 'Consultant' : 'You'}</span>
