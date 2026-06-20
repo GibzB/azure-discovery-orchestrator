@@ -111,7 +111,8 @@ body::before {
 .header-right { display: flex; align-items: center; gap: 12px; }
 
 .status-pill {
-  display: flex; align-items: center; gap: 6px;
+  display: none;
+  align-items: center; gap: 6px;
   background: rgba(34,197,94,.1);
   border: 1px solid rgba(34,197,94,.2);
   border-radius: 999px;
@@ -119,7 +120,6 @@ body::before {
   font-size: 11px; font-weight: 600;
   color: var(--green-500);
   letter-spacing: .3px;
-  display: none;
 }
 @media(min-width:640px){ .status-pill { display: flex; } }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-500); animation: blink 2s ease-in-out infinite; }
