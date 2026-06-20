@@ -40,4 +40,5 @@ knowledgebase/**/*.docx
 # Bicep compiled ARM
 *.json
 !package.json
+!package-lock.json
 !tsconfig*.json
