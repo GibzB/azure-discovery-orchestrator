@@ -68,6 +68,33 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Wait for active deployments to finish
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          RG="rg-discoveryai-${ENV}"
+          echo "Checking for active deployments in $RG..."
+          for i in $(seq 1 18); do
+            ACTIVE=$(az deployment group list \
+              --resource-group "$RG" \
+              --query "[?properties.provisioningState=='Running'].name" \
+              -o tsv 2>/dev/null)
+            COUNT=$(echo "$ACTIVE" | grep -c . || echo "0")
+            echo "  Attempt $i: active deployments = $COUNT"
+            if [ "$COUNT" = "0" ] || [ -z "$ACTIVE" ]; then
+              echo "  No active deployments — proceeding."
+              break
+            fi
+            if [ "$i" = "18" ]; then
+              echo "  Timed out — cancelling stale deployments..."
+              echo "$ACTIVE" | while read -r dep; do
+                [ -n "$dep" ] && az deployment group cancel --resource-group "$RG" --name "$dep" 2>/dev/null && echo "  Cancelled: $dep" || true
+              done
+              sleep 15
+            else
+              sleep 20
+            fi
+          done
+
       - name: Deploy Bicep
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"

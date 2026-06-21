@@ -88,6 +88,35 @@ stages:
                 - checkout: self
 
                 - task: AzureCLI@2
+                  displayName: Wait for active deployments to finish
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      echo "Checking for active deployments in $(resourceGroup)..."
+                      for i in $(seq 1 18); do
+                        ACTIVE=$(az deployment group list \
+                          --resource-group $(resourceGroup) \
+                          --query "[?properties.provisioningState=='Running'].name" \
+                          -o tsv 2>/dev/null)
+                        COUNT=$(echo "$ACTIVE" | grep -c . || echo "0")
+                        echo "  Attempt $i: active = $COUNT"
+                        if [ "$COUNT" = "0" ] || [ -z "$ACTIVE" ]; then
+                          echo "  Clear — proceeding."
+                          break
+                        fi
+                        if [ "$i" = "18" ]; then
+                          echo "$ACTIVE" | while read -r dep; do
+                            [ -n "$dep" ] && az deployment group cancel --resource-group $(resourceGroup) --name "$dep" 2>/dev/null && echo "  Cancelled: $dep" || true
+                          done
+                          sleep 15
+                        else
+                          sleep 20
+                        fi
+                      done
+
+                - task: AzureCLI@2
                   displayName: Deploy Bicep
                   inputs:
                     azureSubscription: $(serviceConnection)
