@@ -64,6 +64,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Attach ACR credentials to Container App
+        id: acr_attach
         continue-on-error: true   # credentials already set; skip if operation in progress
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
@@ -74,10 +75,21 @@ jobs:
             --username "${{ secrets.ACR_USERNAME }}" \
             --password "${{ secrets.ACR_PASSWORD }}"
 
+      - name: Log ACR credential attachment result
+        run: |
+          if [ "${{ steps.acr_attach.outcome }}" = "success" ]; then
+            echo "✅ ACR credentials attached successfully."
+          else
+            echo "⚠️  ACR credential attachment failed or was skipped (outcome: ${{ steps.acr_attach.outcome }})."
+            echo "    This is non-fatal — credentials may already be set on the Container App."
+            echo "    If subsequent steps fail with UNAUTHORIZED, check ACR_USERNAME / ACR_PASSWORD secrets."
+          fi
+
       - name: Wait for Container App to be ready
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
           echo "Waiting for any in-progress operation to complete..."
+          STATE=""
           for i in $(seq 1 12); do
             STATE=$(az containerapp show \
               --name "discoveryai-ca-backend-${ENV}" \
@@ -89,6 +101,11 @@ jobs:
             fi
             sleep 10
           done
+          if [ "$STATE" != "Succeeded" ]; then
+            echo "❌ Container App is not in Succeeded state (state='$STATE'). Aborting image update."
+            exit 1
+          fi
+          echo "✅ Container App is ready."
 
       - name: Update Container App image
         run: |

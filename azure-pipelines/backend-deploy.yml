@@ -71,6 +71,7 @@ stages:
                 - task: AzureCLI@2
                   displayName: Attach ACR credentials (idempotent, non-fatal)
                   continueOnError: true
+                  name: acrAttach
                   inputs:
                     azureSubscription: $(serviceConnection)
                     scriptType: bash
@@ -83,6 +84,18 @@ stages:
                         --username $(ACR_USERNAME) \
                         --password $(ACR_PASSWORD)
 
+                - bash: |
+                    if [ "$(Agent.JobStatus)" = "SucceededWithIssues" ] || [ "$ATTACH_FAILED" = "true" ]; then
+                      echo "⚠️  ACR credential attachment failed or was skipped."
+                      echo "    This is non-fatal — credentials may already be set."
+                      echo "    If image pull fails, check ACR_USERNAME / ACR_PASSWORD variables."
+                    else
+                      echo "✅ ACR credentials attached successfully."
+                    fi
+                  displayName: Log ACR credential attachment result
+                  env:
+                    ATTACH_FAILED: $(acrAttach.result)
+
                 - task: AzureCLI@2
                   displayName: Wait for Container App ready
                   inputs:
@@ -91,6 +104,7 @@ stages:
                     scriptLocation: inlineScript
                     inlineScript: |
                       echo "Waiting for any in-progress operation to complete..."
+                      STATE=""
                       for i in $(seq 1 12); do
                         STATE=$(az containerapp show \
                           --name $(containerAppName) \
@@ -102,6 +116,11 @@ stages:
                         fi
                         sleep 10
                       done
+                      if [ "$STATE" != "Succeeded" ]; then
+                        echo "❌ Container App is not in Succeeded state (state='$STATE'). Aborting."
+                        exit 1
+                      fi
+                      echo "✅ Container App is ready."
 
                 - task: AzureCLI@2
                   displayName: Update Container App image
