@@ -50,10 +50,17 @@ async def chat(
     session = svc.get_or_create_session(request.session_id)
 
     # Run through the OrchestratorAgent (re-using the same agent the voice pipeline uses)
-    response_text = await svc._agent.run(
-        user_input=request.message,
-        history=session.history,
-    )
+    try:
+        response_text = await svc._agent.run(
+            user_input=request.message,
+            history=session.history,
+        )
+    except Exception as exc:
+        logger.error("OrchestratorAgent failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI service unavailable: {type(exc).__name__}: {exc}",
+        )
 
     session.turn += 1
 
