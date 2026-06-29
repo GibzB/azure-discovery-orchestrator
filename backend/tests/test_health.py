@@ -66,27 +66,34 @@ def test_chat_missing_fields_rejected(client):
 
 def test_chat_response_shape(client):
     """A valid chat request returns the expected response shape."""
-    with patch("app.api.routes.chat.CosmosService"), \
-         patch("app.api.routes.chat.get_conversation_service") as mock_dep:
+    from app.main import app
+    from app.api.deps import get_conversation_service
+    from app.services.conversation_service import SessionStatus
 
-        mock_session = MagicMock()
-        mock_session.history = []
-        mock_session.turn = 0
-        mock_session.max_turns = 20
-        mock_session.status = MagicMock(value="active")
+    mock_session = MagicMock()
+    mock_session.history = []
+    mock_session.turn = 0
+    mock_session.max_turns = 20
+    mock_session.status = SessionStatus.ACTIVE
 
-        mock_svc = MagicMock()
-        mock_svc.get_or_create_session.return_value = mock_session
-        mock_svc._agent.run = AsyncMock(return_value="What industry is your company in?")
-        mock_dep.return_value = mock_svc
+    mock_svc = MagicMock()
+    mock_svc.get_or_create_session.return_value = mock_session
+    mock_svc._agent = MagicMock()
+    mock_svc._agent.run = AsyncMock(return_value="What industry is your company in?")
 
-        res = client.post("/api/v1/chat/", json={"session_id": "test-123", "message": "Hello"})
-        assert res.status_code == 200
-        body = res.json()
-        assert "response" in body
-        assert "session_id" in body
-        assert "turn" in body
-        assert "is_final" in body
+    with patch("app.api.routes.chat.CosmosService"):
+        app.dependency_overrides[get_conversation_service] = lambda: mock_svc
+        try:
+            res = client.post("/api/v1/chat/", json={"session_id": "test-123", "message": "Hello"})
+        finally:
+            app.dependency_overrides.clear()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert "response" in body
+    assert "session_id" in body
+    assert "turn" in body
+    assert "is_final" in body
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
@@ -167,18 +174,24 @@ def test_generate_report_returns_markdown(client):
 
 def test_voice_status(client):
     """Voice status endpoint returns session metadata."""
-    with patch("app.api.routes.voice.get_conversation_service") as mock_dep:
-        mock_svc = MagicMock()
-        mock_svc.get_or_create_session.return_value = MagicMock(
-            status=MagicMock(value="active"),
-            turn=3,
-            max_turns=20,
-        )
-        mock_dep.return_value = mock_svc
+    from app.main import app
+    from app.api.deps import get_conversation_service
 
+    mock_svc = MagicMock()
+    mock_svc.get_or_create_session.return_value = MagicMock(
+        status=MagicMock(value="active"),
+        turn=3,
+        max_turns=20,
+    )
+
+    app.dependency_overrides[get_conversation_service] = lambda: mock_svc
+    try:
         res = client.get("/api/v1/voice/status/my-session")
-        assert res.status_code == 200
-        body = res.json()
-        assert body["session_id"] == "my-session"
-        assert "status" in body
-        assert "turn" in body
+    finally:
+        app.dependency_overrides.clear()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["session_id"] == "my-session"
+    assert "status" in body
+    assert "turn" in body
