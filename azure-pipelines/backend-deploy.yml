@@ -32,8 +32,55 @@ variables:
     value: acr-discoveryai-sc
 
 stages:
+  # ── Stage 1: Test ────────────────────────────────────────────────────────
+  - stage: Test
+    displayName: Run Tests
+    jobs:
+      - job: PytestJob
+        displayName: Pytest (smoke + unit)
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+
+          - task: UsePythonVersion@0
+            displayName: Use Python 3.12
+            inputs:
+              versionSpec: '3.12'
+
+          - script: |
+              cd backend
+              pip install --quiet -r requirements.txt
+            displayName: Install dependencies
+
+          - script: |
+              cd backend
+              python -m pytest tests/ -v --tb=short --junit-xml=test-results.xml
+            displayName: Run pytest
+            env:
+              # Provide dummy env vars so Settings() loads without error
+              AZURE_OPENAI_ENDPOINT: https://dummy.openai.azure.com/
+              AZURE_OPENAI_KEY: dummy
+              AZURE_SPEECH_KEY: dummy
+              SEARCH_ENDPOINT: https://dummy.search.windows.net
+              SEARCH_KEY: dummy
+              COSMOS_ENDPOINT: https://dummy.documents.azure.com:443/
+              COSMOS_KEY: dummy
+              STORAGE_CONNECTION_STRING: ""
+
+          - task: PublishTestResults@2
+            displayName: Publish test results
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: backend/test-results.xml
+              testRunTitle: Backend Unit Tests
+
+  # ── Stage 2: Build ────────────────────────────────────────────────────────
   - stage: Build
     displayName: Build & Push Image
+    dependsOn: Test
+    condition: succeeded()
     jobs:
       - job: BuildPush
         displayName: Docker Build & Push
@@ -54,6 +101,7 @@ stages:
                 $(Build.SourceVersion)
                 latest
 
+  # ── Stage 3: Deploy ────────────────────────────────────────────────────────
   - stage: Deploy
     displayName: Deploy to Container Apps
     dependsOn: Build

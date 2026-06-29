@@ -17,9 +17,45 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install --quiet -r backend/requirements.txt
+
+      - name: Run pytest
+        working-directory: backend
+        run: python -m pytest tests/ -v --tb=short --junit-xml=test-results.xml
+        env:
+          AZURE_OPENAI_ENDPOINT: https://dummy.openai.azure.com/
+          AZURE_OPENAI_KEY: dummy
+          AZURE_SPEECH_KEY: dummy
+          SEARCH_ENDPOINT: https://dummy.search.windows.net
+          SEARCH_KEY: dummy
+          COSMOS_ENDPOINT: https://dummy.documents.azure.com:443/
+          COSMOS_KEY: dummy
+          STORAGE_CONNECTION_STRING: ""
+
+      - name: Publish test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: backend/test-results.xml
+
   build:
     name: Build & Push Image
     runs-on: ubuntu-latest
+    needs: test
     environment: ${{ github.event.inputs.environment || 'dev' }}
     outputs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
@@ -65,7 +101,7 @@ jobs:
 
       - name: Attach ACR credentials to Container App
         id: acr_attach
-        continue-on-error: true   # credentials already set; skip if operation in progress
+        continue-on-error: true
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
           az containerapp registry set \
@@ -82,13 +118,11 @@ jobs:
           else
             echo "⚠️  ACR credential attachment failed or was skipped (outcome: ${{ steps.acr_attach.outcome }})."
             echo "    This is non-fatal — credentials may already be set on the Container App."
-            echo "    If subsequent steps fail with UNAUTHORIZED, check ACR_USERNAME / ACR_PASSWORD secrets."
           fi
 
       - name: Wait for Container App to be ready
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
-          echo "Waiting for any in-progress operation to complete..."
           STATE=""
           for i in $(seq 1 12); do
             STATE=$(az containerapp show \
@@ -96,15 +130,10 @@ jobs:
               --resource-group "rg-discoveryai-${ENV}" \
               --query "properties.provisioningState" -o tsv 2>/dev/null)
             echo "  Attempt $i: provisioningState=$STATE"
-            if [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ]; then
-              break
-            fi
+            if [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ]; then break; fi
             sleep 10
           done
-          if [ "$STATE" != "Succeeded" ]; then
-            echo "❌ Container App is not in Succeeded state (state='$STATE'). Aborting image update."
-            exit 1
-          fi
+          if [ "$STATE" != "Succeeded" ]; then echo "❌ Not ready"; exit 1; fi
           echo "✅ Container App is ready."
 
       - name: Update Container App image
@@ -126,18 +155,14 @@ jobs:
 
       - name: Prune old ACR images (keep latest + 2 most recent SHAs)
         run: |
-          # Get all SHA tags sorted newest-first, skip the 2 we want to keep
           TAGS=$(az acr repository show-tags \
             --name "${{ secrets.ACR_NAME }}" \
             --repository backend \
             --orderby time_desc \
             --output tsv | grep -v '^latest$' | tail -n +3)
-
           if [ -z "$TAGS" ]; then
             echo "Nothing to prune."
           else
-            echo "Pruning tags:"
-            echo "$TAGS"
             while IFS= read -r tag; do
               az acr repository delete \
                 --name "${{ secrets.ACR_NAME }}" \

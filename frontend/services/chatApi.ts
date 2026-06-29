@@ -1,4 +1,7 @@
-const BASE_URL = '/api/v1'
+// Use VITE_API_BASE_URL when the SPA is hosted separately from the API (e.g. Blob Storage).
+// Falls back to relative paths when running locally via the Vite dev proxy.
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const BASE_URL = `${API_ORIGIN}/api/v1`
 
 export const chatApi = {
   async send(sessionId: string, message: string): Promise<string> {

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     COSMOS_DATABASE: str = "discovery"
     COSMOS_CONTAINER: str = "sessions"
 
+    # Azure Blob Storage (reports + knowledgebase containers)
+    STORAGE_CONNECTION_STRING: str = ""
+    STORAGE_REPORTS_CONTAINER: str = "reports"
+    STORAGE_KNOWLEDGEBASE_CONTAINER: str = "knowledgebase"
+
     # App
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
     LOG_LEVEL: str = "INFO"

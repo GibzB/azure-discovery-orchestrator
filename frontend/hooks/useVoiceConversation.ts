@@ -47,7 +47,17 @@ interface UseVoiceConversationOptions {
   maxRecordingMs?: number
 }
 
-const BASE_WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+// Derive WebSocket base from VITE_API_BASE_URL if set, otherwise same-origin.
+// This handles the case where the SPA is hosted on Blob Storage (different host than the API).
+function getWsBase(): string {
+  const apiBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+  if (apiBase) {
+    return apiBase.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://').replace(/\/$/, '')
+  }
+  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+}
+
+const BASE_WS_URL = getWsBase()
 
 export function useVoiceConversation({
   sessionId,

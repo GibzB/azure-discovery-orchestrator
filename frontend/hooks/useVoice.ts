@@ -13,9 +13,11 @@ export type VoiceState = 'idle' | 'recording' | 'processing' | 'speaking' | 'err
 
 interface UseVoiceOptions {
   sessionId: string
-  onTranscript?: (text: string) => void  // called with STT result if API returns it
+  onTranscript?: (text: string) => void
   onError?: (msg: string) => void
 }
+
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 export function useVoice({ sessionId, onError }: UseVoiceOptions) {
   const [state, setState] = useState<VoiceState>('idle')
@@ -74,10 +76,10 @@ export function useVoice({ sessionId, onError }: UseVoiceOptions) {
     setState('processing')
     try {
       const form = new FormData()
-      form.append('session_id', sessionId)
+      // session_id is in the path; 'audio' is the UploadFile field name
       form.append('audio', blob, 'recording.webm')
 
-      const res = await fetch('/api/v1/voice/turn', {
+      const res = await fetch(`${API_ORIGIN}/api/v1/voice/turn/${sessionId}`, {
         method: 'POST',
         body: form,
       })
