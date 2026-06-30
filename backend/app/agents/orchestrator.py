@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from azure.identity import ManagedIdentityCredential
 from openai import AsyncAzureOpenAI
 
 from app.core.config import settings
@@ -80,12 +81,26 @@ class OrchestratorAgent:
     name = "orchestrator"
 
     def __init__(self, mcp: MCPClientManager | None = None) -> None:
-        self._client = AsyncAzureOpenAI(
-            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-            api_key=settings.AZURE_OPENAI_KEY,
-            api_version=settings.AZURE_OPENAI_API_VERSION,
-        )
-        self._mcp = mcp  # injected at app startup; may be None if MCP unavailable
+        # Use managed identity when no key is set (running in Azure Container Apps).
+        # Fall back to key auth for local development when AZURE_OPENAI_KEY is set.
+        if settings.AZURE_OPENAI_KEY:
+            self._client = AsyncAzureOpenAI(
+                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                api_key=settings.AZURE_OPENAI_KEY,
+                api_version=settings.AZURE_OPENAI_API_VERSION,
+            )
+        else:
+            from azure.identity import get_bearer_token_provider
+            credential = ManagedIdentityCredential()
+            token_provider = get_bearer_token_provider(
+                credential, "https://cognitiveservices.azure.com/.default"
+            )
+            self._client = AsyncAzureOpenAI(
+                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                azure_ad_token_provider=token_provider,
+                api_version=settings.AZURE_OPENAI_API_VERSION,
+            )
+        self._mcp = mcp
         self._system_prompt = _load_system_prompt()
 
     async def run(

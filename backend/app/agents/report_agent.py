@@ -62,11 +62,23 @@ class ReportAgent(BaseAgent):
     name = "report"
 
     def __init__(self) -> None:
-        self._client = AsyncAzureOpenAI(
-            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-            api_key=settings.AZURE_OPENAI_KEY,
-            api_version=settings.AZURE_OPENAI_API_VERSION,
-        )
+        if settings.AZURE_OPENAI_KEY:
+            self._client = AsyncAzureOpenAI(
+                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                api_key=settings.AZURE_OPENAI_KEY,
+                api_version=settings.AZURE_OPENAI_API_VERSION,
+            )
+        else:
+            from azure.identity import ManagedIdentityCredential, get_bearer_token_provider
+            token_provider = get_bearer_token_provider(
+                ManagedIdentityCredential(),
+                "https://cognitiveservices.azure.com/.default",
+            )
+            self._client = AsyncAzureOpenAI(
+                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                azure_ad_token_provider=token_provider,
+                api_version=settings.AZURE_OPENAI_API_VERSION,
+            )
 
     async def run(self, user_input: str, context: dict[str, Any] | None = None) -> str:
         """
