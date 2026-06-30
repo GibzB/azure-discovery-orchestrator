@@ -79,3 +79,38 @@ async def health_check():
         "service": "azure-discovery-orchestrator",
         "mcp_tools_available": tools_available,
     }
+
+
+@app.get("/health/connectivity")
+async def connectivity_check():
+    """
+    Probe outbound connectivity from inside the container to key endpoints.
+    Returns per-host status so we can diagnose Container App egress issues.
+    """
+    import httpx
+
+    probes = {
+        "openai_azure": f"{settings.AZURE_OPENAI_ENDPOINT}openai/deployments?api-version={settings.AZURE_OPENAI_API_VERSION}",
+        "cognitive_services": "https://discoveryai-aisvc-dev.cognitiveservices.azure.com/",
+        "cosmos": settings.COSMOS_ENDPOINT,
+        "search": settings.SEARCH_ENDPOINT,
+        "internet": "https://httpbin.org/get",
+    }
+
+    results = {}
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        for name, url in probes.items():
+            try:
+                r = await client.get(
+                    url,
+                    headers={"api-key": settings.AZURE_OPENAI_KEY} if "openai" in name or "cognitive" in name else {},
+                )
+                results[name] = {"status": r.status_code, "ok": True}
+            except httpx.ConnectError as e:
+                results[name] = {"status": "CONNECT_ERROR", "ok": False, "detail": str(e)[:200]}
+            except httpx.TimeoutException:
+                results[name] = {"status": "TIMEOUT", "ok": False}
+            except Exception as e:
+                results[name] = {"status": "ERROR", "ok": False, "detail": str(e)[:200]}
+
+    return {"endpoint": settings.AZURE_OPENAI_ENDPOINT, "probes": results}
