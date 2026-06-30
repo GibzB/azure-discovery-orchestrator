@@ -177,6 +177,8 @@ stages:
                     scriptType: bash
                     scriptLocation: inlineScript
                     inlineScript: |
+                      # Update image only — env vars are managed separately.
+                      # Do NOT pass --set-env-vars here; it would wipe all existing vars.
                       az containerapp update \
                         --name $(containerAppName) \
                         --resource-group $(resourceGroup) \

@@ -139,6 +139,9 @@ jobs:
       - name: Update Container App image
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
+          # Update image only — do NOT pass --set-env-vars here.
+          # Env vars are managed separately (set once via az containerapp update or pipeline secrets).
+          # Passing --set-env-vars alongside --image replaces ALL env vars with only those listed.
           az containerapp update \
             --name "discoveryai-ca-backend-${ENV}" \
             --resource-group "rg-discoveryai-${ENV}" \

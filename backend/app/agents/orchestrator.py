@@ -141,7 +141,10 @@ class OrchestratorAgent:
                 "model": settings.AZURE_OPENAI_DEPLOYMENT,
                 "messages": messages,
                 "temperature": 0.4,
-                "max_tokens": 300,  # keep spoken responses short
+                # gpt-oss-120b is a reasoning model: reasoning_content tokens count
+                # toward max_tokens. Reserve enough budget so content is non-empty.
+                "max_tokens": 1500,
+                "max_completion_tokens": 1500,
             }
             if tools:
                 kwargs["tools"] = tools
@@ -155,12 +158,25 @@ class OrchestratorAgent:
                 await process_tool_calls(choice.message.tool_calls, messages, self._mcp)
                 continue  # go round again with tool results
 
-            # Done — extract text
-            reply = choice.message.content or ""
+            # Extract content — reasoning models put the answer in .content
+            # after the reasoning phase completes.
+            reply = (choice.message.content or "").strip()
+
+            # Guard: if content is empty but reasoning exists, extract a summary
+            if not reply:
+                reasoning = getattr(choice.message, "reasoning_content", "") or ""
+                if reasoning:
+                    logger.warning("content empty, finish_reason=%s — extracting from reasoning", choice.finish_reason)
+                    # Take last sentence of reasoning as fallback
+                    sentences = [s.strip() for s in reasoning.split(".") if s.strip()]
+                    reply = sentences[-1] + "." if sentences else "Could you tell me more about your requirements?"
+                else:
+                    reply = "Could you tell me more about your requirements?"
+
             # Update caller's history slice (everything after system prompt)
             history.clear()
             history.extend(messages[1:])  # drop system prompt from stored history
-            return reply.strip()
+            return reply
 
         logger.warning("Orchestrator hit max tool-call rounds (%d)", max_rounds)
         return "I need a moment to gather that information. Could you repeat your last answer?"
