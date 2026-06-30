@@ -180,7 +180,28 @@ stages:
                       az containerapp update \
                         --name $(containerAppName) \
                         --resource-group $(resourceGroup) \
-                        --image $(imageTag)
+                        --image $(imageTag) \
+                        --set-env-vars \
+                          "AZURE_OPENAI_ENDPOINT=$(AZURE_OPENAI_ENDPOINT)" \
+                          "AZURE_OPENAI_KEY=$(AZURE_OPENAI_KEY)" \
+                          "AZURE_OPENAI_DEPLOYMENT=$(AZURE_OPENAI_DEPLOYMENT)" \
+                          "AZURE_OPENAI_API_VERSION=$(AZURE_OPENAI_API_VERSION)" \
+                          "AZURE_SPEECH_KEY=$(AZURE_SPEECH_KEY)" \
+                          "AZURE_SPEECH_REGION=$(AZURE_SPEECH_REGION)" \
+                          "AZURE_SPEECH_VOICE=$(AZURE_SPEECH_VOICE)" \
+                          "SEARCH_ENDPOINT=$(SEARCH_ENDPOINT)" \
+                          "SEARCH_KEY=$(SEARCH_KEY)" \
+                          "SEARCH_INDEX=$(SEARCH_INDEX)" \
+                          "COSMOS_ENDPOINT=$(COSMOS_ENDPOINT)" \
+                          "COSMOS_KEY=$(COSMOS_KEY)" \
+                          "COSMOS_DATABASE=$(COSMOS_DATABASE)" \
+                          "COSMOS_CONTAINER=$(COSMOS_CONTAINER)" \
+                          "STORAGE_CONNECTION_STRING=$(STORAGE_CONNECTION_STRING)" \
+                          "STORAGE_REPORTS_CONTAINER=reports" \
+                          "STORAGE_KNOWLEDGEBASE_CONTAINER=knowledgebase" \
+                          "CORS_ORIGINS=$(CORS_ORIGINS)" \
+                          "LOG_LEVEL=INFO" \
+                          "ENV=${{ parameters.environment }}"
 
                 - task: AzureCLI@2
                   displayName: Verify deployment

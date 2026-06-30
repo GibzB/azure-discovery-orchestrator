@@ -2,6 +2,8 @@
 Application configuration loaded from environment variables
 """
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
+from typing import Any
 
 
 class Settings(BaseSettings):
@@ -32,9 +34,34 @@ class Settings(BaseSettings):
     STORAGE_REPORTS_CONTAINER: str = "reports"
     STORAGE_KNOWLEDGEBASE_CONTAINER: str = "knowledgebase"
 
-    # App
+    # App — accepts JSON array, comma-separated string, or single origin
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
     LOG_LEVEL: str = "INFO"
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Any) -> Any:
+        """
+        Accept all common formats for the CORS_ORIGINS env var:
+          - JSON array:       '["https://foo.com","http://localhost:5173"]'
+          - Comma-separated:  'https://foo.com,http://localhost:5173'
+          - Single value:     'https://foo.com'
+          - Already a list:   ['https://foo.com']
+        """
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            # Try JSON first
+            if v.startswith("["):
+                import json
+                try:
+                    return json.loads(v)
+                except Exception:
+                    pass
+            # Fall back to comma-separated
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
 
     class Config:
         env_file = ".env"
