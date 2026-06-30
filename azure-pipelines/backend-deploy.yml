@@ -199,7 +199,7 @@ stages:
                           "STORAGE_CONNECTION_STRING=$(STORAGE_CONNECTION_STRING)" \
                           "STORAGE_REPORTS_CONTAINER=reports" \
                           "STORAGE_KNOWLEDGEBASE_CONTAINER=knowledgebase" \
-                          "CORS_ORIGINS=$(CORS_ORIGINS)" \
+                          "CORS_ORIGINS_RAW=$(CORS_ORIGINS)" \
                           "LOG_LEVEL=INFO" \
                           "ENV=${{ parameters.environment }}"
 
