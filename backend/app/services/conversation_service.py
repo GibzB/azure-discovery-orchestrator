@@ -136,6 +136,7 @@ class ConversationService:
         # 3. LLM + MCP tools — generate next question or recommendation
         response_text = await self._agent.run(
             user_input=transcript,
+            context={"session_id": session_id},
             history=session.history,
         )
 
@@ -194,6 +195,7 @@ class ConversationService:
         session.history.append({"role": "user", "content": transcript})
         response_text = await self._agent.run(
             user_input=transcript,
+            context={"session_id": session_id},
             history=session.history,
         )
         session.turn += 1

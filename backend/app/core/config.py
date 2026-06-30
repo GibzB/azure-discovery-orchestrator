@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     AZURE_OPENAI_DEPLOYMENT: str = "gpt-oss-120b"
     AZURE_OPENAI_API_VERSION: str = "2024-12-01-preview"
 
+    # Azure AI Agents / Foundry endpoint (AIServices cognitiveservices URL)
+    # When set, the OrchestratorAgent will use azure-ai-agents SDK instead of
+    # raw AsyncAzureOpenAI — works with DefaultAzureCredential / managed identity.
+    AZURE_FOUNDRY_ENDPOINT: str = ""
+
     # Azure Speech (STT + TTS — speech-to-speech pipeline)
     AZURE_SPEECH_KEY: str = ""
     AZURE_SPEECH_REGION: str = "eastus"

@@ -53,6 +53,7 @@ async def chat(
     try:
         response_text = await svc._agent.run(
             user_input=request.message,
+            context={"session_id": request.session_id},
             history=session.history,
         )
     except Exception as exc:
