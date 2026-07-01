@@ -101,7 +101,6 @@ jobs:
       - name: Wait for Container App to be ready
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
-          echo "Waiting for any in-progress operation to clear..."
           for i in $(seq 1 18); do
             STATE=$(az containerapp show \
               --name "discoveryai-ca-backend-${ENV}" \
@@ -111,10 +110,24 @@ jobs:
             if [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ]; then break; fi
             sleep 10
           done
-          if [ "$STATE" != "Succeeded" ]; then echo "❌ Not ready (state=$STATE)"; exit 1; fi
-          echo "✅ Container App is ready."
+          [ "$STATE" = "Succeeded" ] && echo "✅ Ready" || (echo "❌ Not ready"; exit 1)
 
-      - name: Deploy new image + full env vars
+      - name: Sync secrets to Container App secret store
+        run: |
+          ENV="${{ needs.build.outputs.deploy_env }}"
+          # Store sensitive values as Container App secrets (named refs).
+          # This runs before the env var update so secretrefs resolve correctly.
+          az containerapp secret set \
+            --name "discoveryai-ca-backend-${ENV}" \
+            --resource-group "rg-discoveryai-${ENV}" \
+            --secrets \
+              "openai-key=${{ secrets.AZURE_OPENAI_KEY }}" \
+              "speech-key=${{ secrets.AZURE_SPEECH_KEY }}" \
+              "search-key=${{ secrets.SEARCH_KEY }}" \
+              "cosmos-key=${{ secrets.COSMOS_KEY }}" \
+              "storage-conn=${{ secrets.STORAGE_CONNECTION_STRING }}"
+
+      - name: Deploy new image + env vars (secrets via secretref)
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
           IMAGE="${{ needs.build.outputs.image_tag }}"
@@ -127,20 +140,20 @@ jobs:
               "ENV=${ENV}" \
               "LOG_LEVEL=INFO" \
               "AZURE_OPENAI_ENDPOINT=https://discoveryai-aisvc-dev.openai.azure.com/" \
-              "AZURE_OPENAI_KEY=${{ secrets.AZURE_OPENAI_KEY }}" \
+              "AZURE_OPENAI_KEY=secretref:openai-key" \
               "AZURE_OPENAI_DEPLOYMENT=gpt-oss-120b" \
               "AZURE_OPENAI_API_VERSION=2024-12-01-preview" \
-              "AZURE_SPEECH_KEY=${{ secrets.AZURE_SPEECH_KEY }}" \
+              "AZURE_SPEECH_KEY=secretref:speech-key" \
               "AZURE_SPEECH_REGION=italynorth" \
               "AZURE_SPEECH_VOICE=en-US-AvaMultilingualNeural" \
               "SEARCH_ENDPOINT=https://discoveryai-srch-dev.search.windows.net" \
-              "SEARCH_KEY=${{ secrets.SEARCH_KEY }}" \
+              "SEARCH_KEY=secretref:search-key" \
               "SEARCH_INDEX=knowledgebase" \
               "COSMOS_ENDPOINT=https://discoveryai-cosmos-dev.documents.azure.com:443/" \
-              "COSMOS_KEY=${{ secrets.COSMOS_KEY }}" \
+              "COSMOS_KEY=secretref:cosmos-key" \
               "COSMOS_DATABASE=discovery" \
               "COSMOS_CONTAINER=sessions" \
-              "STORAGE_CONNECTION_STRING=${{ secrets.STORAGE_CONNECTION_STRING }}" \
+              "STORAGE_CONNECTION_STRING=secretref:storage-conn" \
               "STORAGE_REPORTS_CONTAINER=reports" \
               "STORAGE_KNOWLEDGEBASE_CONTAINER=knowledgebase" \
               "CORS_ORIGINS_RAW=https://discoveryaiswadev.z38.web.core.windows.net,http://localhost:5173"
@@ -160,27 +173,22 @@ jobs:
             --name "discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}" \
             --resource-group "rg-discoveryai-${{ needs.build.outputs.deploy_env }}" \
             --query "properties.configuration.ingress.fqdn" -o tsv)
-          echo "Testing https://${FQDN}/health ..."
-          sleep 15
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "https://${FQDN}/health")
-          echo "Health check HTTP status: $STATUS"
-          [ "$STATUS" = "200" ] && echo "✅ Health check passed" || (echo "❌ Health check failed" && exit 1)
+          sleep 20
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "https://${FQDN}/health")
+          echo "Health HTTP $STATUS"
+          [ "$STATUS" = "200" ] && echo "✅ Healthy" || (echo "❌ Health check failed"; exit 1)
 
-      - name: Prune old ACR images (keep latest + 2 most recent SHAs)
+      - name: Prune old ACR images (keep latest + 2 SHAs)
         run: |
           TAGS=$(az acr repository show-tags \
             --name "${{ secrets.ACR_NAME }}" \
             --repository backend \
             --orderby time_desc \
             --output tsv | grep -v '^latest$' | tail -n +3)
-          if [ -z "$TAGS" ]; then
-            echo "Nothing to prune."
-          else
-            while IFS= read -r tag; do
-              az acr repository delete \
-                --name "${{ secrets.ACR_NAME }}" \
-                --image "backend:${tag}" \
-                --yes 2>/dev/null && echo "  deleted: $tag" || echo "  skip: $tag"
-            done <<< "$TAGS"
-          fi
-          echo "✅ ACR pruned — keeping latest + 2 most recent SHAs"
+          [ -z "$TAGS" ] && echo "Nothing to prune." && exit 0
+          while IFS= read -r tag; do
+            az acr repository delete --name "${{ secrets.ACR_NAME }}" \
+              --image "backend:${tag}" --yes 2>/dev/null \
+              && echo "  deleted: $tag" || echo "  skip: $tag"
+          done <<< "$TAGS"
+          echo "✅ ACR pruned"
