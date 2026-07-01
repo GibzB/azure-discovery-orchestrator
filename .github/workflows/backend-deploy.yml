@@ -144,47 +144,13 @@ jobs:
       - name: Update Container App image
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
-          # Update image only — do NOT pass --set-env-vars here.
-          # Env vars are managed separately (set once via az containerapp update or pipeline secrets).
-          # Passing --set-env-vars alongside --image replaces ALL env vars with only those listed.
+          # Update image ONLY — env vars are managed directly on the Container App
+          # (set via Azure portal or az CLI, not via pipeline secrets).
+          # Adding --set-env-vars here would wipe all vars not listed, breaking the app.
           az containerapp update \
             --name "discoveryai-ca-backend-${ENV}" \
             --resource-group "rg-discoveryai-${ENV}" \
-            --image "${{ needs.build.outputs.image_tag }}" \
-            --set-env-vars \
-              "AZURE_OPENAI_ENDPOINT=https://discoveryai-aisvc-dev.cognitiveservices.azure.com/" \
-              "AZURE_OPENAI_KEY=${{ secrets.AZURE_OPENAI_KEY }}" \
-              "AZURE_FOUNDRY_ENDPOINT=https://discoveryai-aisvc-dev.cognitiveservices.azure.com/" \
-              "AZURE_OPENAI_DEPLOYMENT=gpt-oss-120b" \
-              "AZURE_OPENAI_API_VERSION=2024-12-01-preview" \
-              "AZURE_SPEECH_KEY=${{ secrets.AZURE_SPEECH_KEY }}" \
-              "AZURE_SPEECH_REGION=italynorth" \
-              "AZURE_SPEECH_VOICE=en-US-AvaMultilingualNeural" \
-              "SEARCH_ENDPOINT=${{ secrets.SEARCH_ENDPOINT }}" \
-              "SEARCH_KEY=${{ secrets.SEARCH_KEY }}" \
-              "SEARCH_INDEX=knowledgebase" \
-              "COSMOS_ENDPOINT=${{ secrets.COSMOS_ENDPOINT }}" \
-              "COSMOS_KEY=${{ secrets.COSMOS_KEY }}" \
-              "COSMOS_DATABASE=discovery" \
-              "COSMOS_CONTAINER=sessions" \
-              "STORAGE_CONNECTION_STRING=${{ secrets.STORAGE_CONNECTION_STRING }}" \
-              "STORAGE_REPORTS_CONTAINER=reports" \
-              "STORAGE_KNOWLEDGEBASE_CONTAINER=knowledgebase" \
-              "CORS_ORIGINS_RAW=https://discoveryaiswadev.z38.web.core.windows.net,http://localhost:5173" \
-              "LOG_LEVEL=INFO" \
-              "ENV=${ENV}"
-
-      - name: Ensure managed identity is enabled
-        run: |
-          ENV="${{ needs.build.outputs.deploy_env }}"
-          # az containerapp update --set-env-vars can silently reset the identity.
-          # Re-assign the system-assigned managed identity after every deploy.
-          az containerapp identity assign \
-            --name "discoveryai-ca-backend-${ENV}" \
-            --resource-group "rg-discoveryai-${ENV}" \
-            --system-assigned \
-            --output none
-          echo "✅ Managed identity (system-assigned) confirmed."
+            --image "${{ needs.build.outputs.image_tag }}"
 
       - name: Verify deployment
         run: |
