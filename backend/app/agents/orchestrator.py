@@ -91,7 +91,7 @@ def _get_endpoint() -> str:
     """
     Return the Azure OpenAI / AIServices endpoint.
     Prefers AZURE_FOUNDRY_ENDPOINT, falls back to AZURE_OPENAI_ENDPOINT.
-    Uses the services.ai.azure.com path which works for both key and token auth.
+    Trailing slash is stripped — the AsyncAzureOpenAI SDK adds /openai/ itself.
     """
     ep = settings.AZURE_FOUNDRY_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT
     if not ep:
@@ -99,7 +99,9 @@ def _get_endpoint() -> str:
             "Neither AZURE_FOUNDRY_ENDPOINT nor AZURE_OPENAI_ENDPOINT is configured. "
             "Set AZURE_FOUNDRY_ENDPOINT=https://<resource>.cognitiveservices.azure.com/"
         )
-    return ep
+    # Strip trailing slash — AsyncAzureOpenAI appends /openai/ automatically.
+    # A trailing slash would create a double-slash path that returns 404.
+    return ep.rstrip("/")
 
 
 def _build_client():
