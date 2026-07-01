@@ -90,8 +90,8 @@ Work through these phases in order, adapting based on answers:
 def _get_endpoint() -> str:
     """
     Return the Azure OpenAI / AIServices endpoint.
-    Prefers AZURE_FOUNDRY_ENDPOINT (which should point to the cognitiveservices
-    or services.ai.azure.com URL), falls back to AZURE_OPENAI_ENDPOINT.
+    Prefers AZURE_FOUNDRY_ENDPOINT, falls back to AZURE_OPENAI_ENDPOINT.
+    Uses the services.ai.azure.com path which works for both key and token auth.
     """
     ep = settings.AZURE_FOUNDRY_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT
     if not ep:
@@ -106,10 +106,12 @@ def _build_client():
     """
     Build an AsyncAzureOpenAI client.
 
-    Auth strategy:
-    - If AZURE_OPENAI_KEY is set (non-empty): use API key auth (local dev).
-    - Otherwise: use ManagedIdentityCredential → DefaultAzureCredential chain
-      (Container Apps managed identity or `az login`).
+    Note: The gpt-oss-120b model (OpenAI-OSS format) on Azure AIServices does
+    NOT support Azure AD / bearer token auth — only API key auth is supported.
+    The AZURE_OPENAI_KEY is always required for inference.
+
+    If the key is not set, we attempt managed identity as a best-effort fallback
+    (may work for standard Azure OpenAI deployments on the same resource).
     """
     from openai import AsyncAzureOpenAI
 
@@ -117,15 +119,19 @@ def _build_client():
     api_version = settings.AZURE_OPENAI_API_VERSION
 
     if settings.AZURE_OPENAI_KEY:
-        logger.info("[OrchestratorAgent] Using API key auth (local dev mode)")
+        logger.info("[OrchestratorAgent] Using API key auth")
         return AsyncAzureOpenAI(
             azure_endpoint=endpoint,
             api_key=settings.AZURE_OPENAI_KEY,
             api_version=api_version,
         )
 
-    # Managed identity / DefaultAzureCredential path
-    logger.info("[OrchestratorAgent] Using DefaultAzureCredential (managed identity / az login)")
+    # Fallback to managed identity (works for standard Azure OpenAI deployments).
+    # For gpt-oss-120b (OpenAI-OSS), the key must be provided.
+    logger.warning(
+        "[OrchestratorAgent] AZURE_OPENAI_KEY is empty — attempting managed identity auth. "
+        "Note: gpt-oss-120b (OpenAI-OSS) may not support bearer token auth."
+    )
     from azure.identity import DefaultAzureCredential, get_bearer_token_provider
     token_provider = get_bearer_token_provider(
         DefaultAzureCredential(),
