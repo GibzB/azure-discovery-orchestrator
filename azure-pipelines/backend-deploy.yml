@@ -125,12 +125,20 @@ stages:
                     scriptType: bash
                     scriptLocation: inlineScript
                     inlineScript: |
+                      # Fetch the ACR admin password dynamically via the service connection
+                      # so we don't depend on ACR_PASSWORD being set in the variable group.
+                      ACR_NAME=$(echo "$(ACR_LOGIN_SERVER)" | cut -d. -f1)
+                      ACR_PWD=$(az acr credential show --name "$ACR_NAME" --query "passwords[0].value" -o tsv 2>/dev/null)
+                      if [ -z "$ACR_PWD" ]; then
+                        echo "⚠️  Could not fetch ACR password — trying variable group fallback"
+                        ACR_PWD="$(ACR_PASSWORD)"
+                      fi
                       az containerapp registry set \
                         --name $(containerAppName) \
                         --resource-group $(resourceGroup) \
                         --server $(ACR_LOGIN_SERVER) \
-                        --username $(ACR_USERNAME) \
-                        --password $(ACR_PASSWORD)
+                        --username "$ACR_NAME" \
+                        --password "$ACR_PWD"
 
                 - bash: |
                     if [ "$(Agent.JobStatus)" = "SucceededWithIssues" ] || [ "$ATTACH_FAILED" = "true" ]; then

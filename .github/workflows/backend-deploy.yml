@@ -104,12 +104,17 @@ jobs:
         continue-on-error: true
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
+          # Fetch ACR password dynamically via the service principal (avoids stale secrets).
+          ACR_PWD=$(az acr credential show --name "${{ secrets.ACR_NAME }}" --query "passwords[0].value" -o tsv 2>/dev/null || echo "")
+          if [ -z "$ACR_PWD" ]; then
+            ACR_PWD="${{ secrets.ACR_PASSWORD }}"
+          fi
           az containerapp registry set \
             --name "discoveryai-ca-backend-${ENV}" \
             --resource-group "rg-discoveryai-${ENV}" \
             --server "${{ secrets.ACR_LOGIN_SERVER }}" \
             --username "${{ secrets.ACR_USERNAME }}" \
-            --password "${{ secrets.ACR_PASSWORD }}"
+            --password "$ACR_PWD"
 
       - name: Log ACR credential attachment result
         run: |
