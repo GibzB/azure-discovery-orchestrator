@@ -21,9 +21,9 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5.3.0
         with:
           python-version: '3.12'
           cache: pip
@@ -46,7 +46,7 @@ jobs:
           STORAGE_CONNECTION_STRING: ""
 
       - name: Publish test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         if: always()
         with:
           name: backend-test-results
@@ -62,7 +62,7 @@ jobs:
       deploy_env: ${{ steps.meta.outputs.deploy_env }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Azure Login (Workload Identity Federation)
         uses: azure/login@v2.3.0
@@ -79,8 +79,7 @@ jobs:
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           TAG="${{ secrets.ACR_LOGIN_SERVER }}/backend:${{ github.sha }}"
-          docker build -t "$TAG" ./backend
-          docker build -t "${{ secrets.ACR_LOGIN_SERVER }}/backend:latest" ./backend
+          docker build -t "$TAG" -t "${{ secrets.ACR_LOGIN_SERVER }}/backend:latest" ./backend
           docker push "$TAG"
           docker push "${{ secrets.ACR_LOGIN_SERVER }}/backend:latest"
           echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -99,37 +98,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Attach ACR credentials to Container App
-        id: acr_attach
-        continue-on-error: true
-        run: |
-          ENV="${{ needs.build.outputs.deploy_env }}"
-          # Fetch ACR password dynamically via the service principal (avoids stale secrets).
-          ACR_PWD=$(az acr credential show --name "${{ secrets.ACR_NAME }}" --query "passwords[0].value" -o tsv 2>/dev/null || echo "")
-          if [ -z "$ACR_PWD" ]; then
-            ACR_PWD="${{ secrets.ACR_PASSWORD }}"
-          fi
-          az containerapp registry set \
-            --name "discoveryai-ca-backend-${ENV}" \
-            --resource-group "rg-discoveryai-${ENV}" \
-            --server "${{ secrets.ACR_LOGIN_SERVER }}" \
-            --username "${{ secrets.ACR_USERNAME }}" \
-            --password "$ACR_PWD"
-
-      - name: Log ACR credential attachment result
-        run: |
-          if [ "${{ steps.acr_attach.outcome }}" = "success" ]; then
-            echo "✅ ACR credentials attached successfully."
-          else
-            echo "⚠️  ACR credential attachment failed or was skipped (outcome: ${{ steps.acr_attach.outcome }})."
-            echo "    This is non-fatal — credentials may already be set on the Container App."
-          fi
-
       - name: Wait for Container App to be ready
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
-          STATE=""
-          for i in $(seq 1 12); do
+          echo "Waiting for any in-progress operation to clear..."
+          for i in $(seq 1 18); do
             STATE=$(az containerapp show \
               --name "discoveryai-ca-backend-${ENV}" \
               --resource-group "rg-discoveryai-${ENV}" \
@@ -138,19 +111,43 @@ jobs:
             if [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ]; then break; fi
             sleep 10
           done
-          if [ "$STATE" != "Succeeded" ]; then echo "❌ Not ready"; exit 1; fi
+          if [ "$STATE" != "Succeeded" ]; then echo "❌ Not ready (state=$STATE)"; exit 1; fi
           echo "✅ Container App is ready."
 
-      - name: Update Container App image
+      - name: Deploy new image + full env vars
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
-          # Update image ONLY — env vars are managed directly on the Container App
-          # (set via Azure portal or az CLI, not via pipeline secrets).
-          # Adding --set-env-vars here would wipe all vars not listed, breaking the app.
+          IMAGE="${{ needs.build.outputs.image_tag }}"
+
+          # Deploy image AND all required env vars together in one atomic update.
+          # This prevents the env-var wipe that happens when --image is used alone
+          # on a Container App whose env was set by a prior partial update.
+          # All sensitive values are stored as GitHub environment secrets.
           az containerapp update \
             --name "discoveryai-ca-backend-${ENV}" \
             --resource-group "rg-discoveryai-${ENV}" \
-            --image "${{ needs.build.outputs.image_tag }}"
+            --image "$IMAGE" \
+            --set-env-vars \
+              "ENV=${ENV}" \
+              "LOG_LEVEL=INFO" \
+              "AZURE_OPENAI_ENDPOINT=https://discoveryai-aisvc-dev.openai.azure.com/" \
+              "AZURE_OPENAI_KEY=${{ secrets.AZURE_OPENAI_KEY }}" \
+              "AZURE_OPENAI_DEPLOYMENT=gpt-oss-120b" \
+              "AZURE_OPENAI_API_VERSION=2024-12-01-preview" \
+              "AZURE_SPEECH_KEY=${{ secrets.AZURE_SPEECH_KEY }}" \
+              "AZURE_SPEECH_REGION=italynorth" \
+              "AZURE_SPEECH_VOICE=en-US-AvaMultilingualNeural" \
+              "SEARCH_ENDPOINT=https://discoveryai-srch-dev.search.windows.net" \
+              "SEARCH_KEY=${{ secrets.SEARCH_KEY }}" \
+              "SEARCH_INDEX=knowledgebase" \
+              "COSMOS_ENDPOINT=https://discoveryai-cosmos-dev.documents.azure.com:443/" \
+              "COSMOS_KEY=${{ secrets.COSMOS_KEY }}" \
+              "COSMOS_DATABASE=discovery" \
+              "COSMOS_CONTAINER=sessions" \
+              "STORAGE_CONNECTION_STRING=${{ secrets.STORAGE_CONNECTION_STRING }}" \
+              "STORAGE_REPORTS_CONTAINER=reports" \
+              "STORAGE_KNOWLEDGEBASE_CONTAINER=knowledgebase" \
+              "CORS_ORIGINS=[\"https://discoveryaiswadev.z38.web.core.windows.net\",\"http://localhost:5173\"]"
 
       - name: Verify deployment
         run: |
@@ -158,8 +155,20 @@ jobs:
           az containerapp show \
             --name "discoveryai-ca-backend-${ENV}" \
             --resource-group "rg-discoveryai-${ENV}" \
-            --query "{fqdn:properties.configuration.ingress.fqdn,state:properties.provisioningState}" \
+            --query "{fqdn:properties.configuration.ingress.fqdn, state:properties.provisioningState, image:properties.template.containers[0].image}" \
             -o table
+
+      - name: Smoke test health endpoint
+        run: |
+          FQDN=$(az containerapp show \
+            --name "discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}" \
+            --resource-group "rg-discoveryai-${{ needs.build.outputs.deploy_env }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "Testing https://${FQDN}/health ..."
+          sleep 15
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "https://${FQDN}/health")
+          echo "Health check HTTP status: $STATUS"
+          [ "$STATUS" = "200" ] && echo "✅ Health check passed" || (echo "❌ Health check failed" && exit 1)
 
       - name: Prune old ACR images (keep latest + 2 most recent SHAs)
         run: |
