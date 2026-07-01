@@ -18,25 +18,31 @@ Discovery question flow (order may adapt based on answers):
 
 Implementation note
 -------------------
-This module uses the **azure-ai-agents** SDK (AgentsClient) backed by an
-AIServices endpoint with DefaultAzureCredential.  In Azure Container Apps the
-credential resolves automatically to the system-assigned managed identity;
-locally it falls back through az login / env vars.
+Uses AsyncAzureOpenAI with the AIServices cognitiveservices endpoint
+(NOT the legacy *.openai.azure.com endpoint) which IS reachable from
+Italy North Container Apps.
 
-Using AgentsClient instead of raw AsyncAzureOpenAI solves two problems seen
-in the Italy North region:
-  1. Network routing — the Cognitive Services data plane IS reachable, while
-     *.openai.azure.com was not from the Container App.
-  2. Reasoning model (gpt-oss-120b) empty content — the agents thread API
-     extracts the final answer after reasoning completes, no max_tokens tuning.
+Auth priority:
+  1. In Container Apps: ManagedIdentityCredential (system-assigned identity)
+     — requires AZURE_OPENAI_KEY to be empty/unset
+  2. Local dev: DefaultAzureCredential (picks up `az login`)
+  3. Fallback: API key from AZURE_OPENAI_KEY (for local dev with a key)
+
+Reasoning model handling:
+  gpt-oss-120b is a reasoning model. It emits a `reasoning_content` field
+  and often returns empty `content` when max_completion_tokens is too low.
+  We use max_completion_tokens=2000 (generous budget) and fall back to
+  extracting the last sentence of reasoning_content when content is empty.
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
 from app.mcp.client import MCPClientManager
+from app.mcp.tool_handler import process_tool_calls
 
 logger = logging.getLogger(__name__)
 
@@ -81,100 +87,96 @@ Work through these phases in order, adapting based on answers:
 """.strip()
 
 
-def _get_foundry_endpoint() -> str:
-    """Return the AI Services endpoint, preferring AZURE_FOUNDRY_ENDPOINT."""
+def _get_endpoint() -> str:
+    """
+    Return the Azure OpenAI / AIServices endpoint.
+    Prefers AZURE_FOUNDRY_ENDPOINT (which should point to the cognitiveservices
+    or services.ai.azure.com URL), falls back to AZURE_OPENAI_ENDPOINT.
+    """
     ep = settings.AZURE_FOUNDRY_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT
     if not ep:
         raise ValueError(
-            "Neither AZURE_FOUNDRY_ENDPOINT nor AZURE_OPENAI_ENDPOINT is set. "
+            "Neither AZURE_FOUNDRY_ENDPOINT nor AZURE_OPENAI_ENDPOINT is configured. "
             "Set AZURE_FOUNDRY_ENDPOINT=https://<resource>.cognitiveservices.azure.com/"
         )
-    return ep.rstrip("/") + "/"
+    return ep
 
 
-def _build_credential():
+def _build_client():
     """
-    Return an Azure credential appropriate for the current environment.
+    Build an AsyncAzureOpenAI client.
 
-    - Container Apps with managed identity → DefaultAzureCredential picks up
-      the IDENTITY_ENDPOINT / IDENTITY_HEADER env vars automatically.
-    - Local dev with `az login` → DefaultAzureCredential falls through to
-      AzureCliCredential.
-    - Local dev with a key → we still use DefaultAzureCredential so the code
-      path is identical; the key is used by report_agent which still uses the
-      raw SDK.
+    Auth strategy:
+    - If AZURE_OPENAI_KEY is set (non-empty): use API key auth (local dev).
+    - Otherwise: use ManagedIdentityCredential → DefaultAzureCredential chain
+      (Container Apps managed identity or `az login`).
     """
-    from azure.identity import DefaultAzureCredential
-    return DefaultAzureCredential()
+    from openai import AsyncAzureOpenAI
+
+    endpoint = _get_endpoint()
+    api_version = settings.AZURE_OPENAI_API_VERSION
+
+    if settings.AZURE_OPENAI_KEY:
+        logger.info("[OrchestratorAgent] Using API key auth (local dev mode)")
+        return AsyncAzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=settings.AZURE_OPENAI_KEY,
+            api_version=api_version,
+        )
+
+    # Managed identity / DefaultAzureCredential path
+    logger.info("[OrchestratorAgent] Using DefaultAzureCredential (managed identity / az login)")
+    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+    token_provider = get_bearer_token_provider(
+        DefaultAzureCredential(),
+        "https://cognitiveservices.azure.com/.default",
+    )
+    return AsyncAzureOpenAI(
+        azure_endpoint=endpoint,
+        azure_ad_token_provider=token_provider,
+        api_version=api_version,
+    )
+
+
+def _extract_reply_from_message(message) -> str:
+    """
+    Extract text content from a chat completion message.
+
+    gpt-oss-120b (reasoning model) sometimes returns empty `content` with the
+    actual answer buried in `reasoning_content`. When that happens we extract
+    the last sentence of the reasoning as a reasonable spoken response.
+    """
+    content = (message.content or "").strip()
+    if content:
+        return content
+
+    # Fallback: extract from reasoning_content
+    reasoning = getattr(message, "reasoning_content", None) or ""
+    reasoning = reasoning.strip()
+    if reasoning:
+        logger.warning(
+            "[OrchestratorAgent] content empty — extracting summary from reasoning_content (%d chars)",
+            len(reasoning),
+        )
+        sentences = [s.strip() for s in reasoning.replace("\n", " ").split(".") if s.strip()]
+        return (sentences[-1] + ".") if sentences else ""
+
+    return ""
 
 
 class OrchestratorAgent:
     """
-    Stateful agent backed by azure-ai-agents AgentsClient.
-
-    Each session gets its own Agents thread so conversation history is
-    managed server-side. In-memory history is also kept for compatibility
-    with callers that pass and mutate the history list (e.g. ConversationService
-    and the voice pipeline).
+    Stateful agent that maintains a per-session message history and
+    uses AsyncAzureOpenAI (AIServices endpoint) with MCP tool-calling
+    to drive the discovery conversation.
     """
 
     name = "orchestrator"
 
     def __init__(self, mcp: MCPClientManager | None = None) -> None:
-        from azure.ai.agents import AgentsClient
-
-        endpoint = _get_foundry_endpoint()
-        credential = _build_credential()
-
-        self._client = AgentsClient(endpoint=endpoint, credential=credential)
+        self._client = _build_client()
         self._mcp = mcp
         self._system_prompt = _load_system_prompt()
-
-        # Lazily-created persistent agent (one per process).
-        self._agent_id: str | None = None
-        # session_id → Agents thread_id mapping (in-memory; survives the
-        # Container App instance lifetime and is also persisted in Cosmos via
-        # the chat route).
-        self._thread_map: dict[str, str] = {}
-
-    # ── Internal helpers ──────────────────────────────────────────────────────
-
-    def _ensure_agent(self) -> str:
-        """Create the Agents API agent if it does not exist yet."""
-        if self._agent_id:
-            return self._agent_id
-
-        agent = self._client.create_agent(
-            model=settings.AZURE_OPENAI_DEPLOYMENT,
-            name="discovery-orchestrator",
-            instructions=self._system_prompt,
-        )
-        self._agent_id = agent.id
-        logger.info("[OrchestratorAgent] Created Agents agent id=%s", agent.id)
-        return agent.id
-
-    def _get_or_create_thread(self, session_id: str) -> str:
-        """Return the thread_id for a session, creating a new one if needed."""
-        if session_id not in self._thread_map:
-            thread = self._client.create_thread()
-            self._thread_map[session_id] = thread.id
-            logger.info(
-                "[OrchestratorAgent] Created thread id=%s for session=%s",
-                thread.id,
-                session_id,
-            )
-        return self._thread_map[session_id]
-
-    def _extract_reply(self, thread_id: str) -> str:
-        """Pull the latest assistant message from the thread."""
-        messages = self._client.list_messages(thread_id=thread_id)
-        # get_last_text_message_by_role returns the most recent assistant msg
-        last = messages.get_last_text_message_by_role("assistant")
-        if last:
-            return (last.text.value or "").strip()
-        return ""
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     async def run(
         self,
@@ -187,9 +189,9 @@ class OrchestratorAgent:
 
         Args:
             user_input:  Transcribed speech (or typed text) from the client.
-            context:     Optional metadata (session_id, phase, etc.).
-            history:     Conversation history list (kept for compatibility;
-                         the Agents API manages server-side state).
+            context:     Optional metadata (session_id, phase, etc.) — kept for
+                         API compatibility but not used internally.
+            history:     Full conversation history (mutated in-place with new messages).
 
         Returns:
             Plain-text response to be spoken via TTS.
@@ -197,58 +199,62 @@ class OrchestratorAgent:
         if history is None:
             history = []
 
-        # Derive a stable session identifier.  Fall back to a hash of the
-        # current history length so callers that don't pass context still get
-        # thread isolation per agent instance.
-        session_id: str = (context or {}).get("session_id", f"anon-{id(history)}")
+        # Prepend system prompt on first turn
+        messages: list[dict] = (
+            [{"role": "system", "content": self._system_prompt}] + history
+            if not any(m.get("role") == "system" for m in history)
+            else list(history)
+        )
 
-        try:
-            agent_id = self._ensure_agent()
-            thread_id = self._get_or_create_thread(session_id)
+        messages.append({"role": "user", "content": user_input})
 
-            # Post the user message to the thread
-            self._client.create_message(
-                thread_id=thread_id,
-                role="user",
-                content=user_input,
-            )
+        tools = self._mcp.all_tools_for_openai() if self._mcp else []
 
-            # Run the agent and wait for completion (handles tool-call loop internally)
-            run = self._client.create_and_process_run(
-                thread_id=thread_id,
-                agent_id=agent_id,
-            )
-            logger.debug(
-                "[OrchestratorAgent] run id=%s status=%s session=%s",
-                run.id,
-                run.status,
-                session_id,
-            )
+        # ── Agentic loop: keep calling until no more tool_calls ───────────────
+        max_rounds = 5
+        for round_num in range(max_rounds):
+            kwargs: dict[str, Any] = {
+                "model": settings.AZURE_OPENAI_DEPLOYMENT,
+                "messages": messages,
+                "temperature": 0.4,
+                # gpt-oss-120b is a reasoning model.
+                # Use max_completion_tokens only (includes reasoning tokens).
+                # A budget of 2000 is sufficient for short spoken responses.
+                "max_completion_tokens": 2000,
+            }
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
 
-            reply = self._extract_reply(thread_id)
+            response = await self._client.chat.completions.create(**kwargs)
+            choice = response.choices[0]
+
+            # Serialise the message for history storage (handles tool_calls)
+            msg_dict = choice.message.model_dump(exclude_none=True)
+            messages.append(msg_dict)
+
+            if choice.finish_reason == "tool_calls" and self._mcp:
+                await process_tool_calls(choice.message.tool_calls, messages, self._mcp)
+                continue  # go round again with tool results
+
+            reply = _extract_reply_from_message(choice.message)
 
             if not reply:
                 logger.warning(
-                    "[OrchestratorAgent] Empty reply from Agents API "
-                    "(run_id=%s, status=%s) — using fallback",
-                    run.id,
-                    run.status,
+                    "[OrchestratorAgent] No reply extracted "
+                    "(finish_reason=%s, round=%d) — using fallback",
+                    choice.finish_reason,
+                    round_num,
                 )
                 reply = "Could you tell me more about your requirements?"
 
-            # Keep history in sync for callers that read it
-            history.append({"role": "user", "content": user_input})
-            history.append({"role": "assistant", "content": reply})
-
+            # Update caller's history slice (drop system prompt from stored history)
+            history.clear()
+            history.extend(m for m in messages[1:] if isinstance(m, dict))
             return reply
 
-        except Exception as exc:
-            logger.error(
-                "[OrchestratorAgent] Agents API call failed: %s",
-                exc,
-                exc_info=True,
-            )
-            raise
+        logger.warning("Orchestrator hit max tool-call rounds (%d)", max_rounds)
+        return "I need a moment to gather that information. Could you repeat your last answer?"
 
     async def opening_message(self) -> str:
         """
@@ -257,6 +263,5 @@ class OrchestratorAgent:
         """
         return await self.run(
             user_input="[SESSION_START]",
-            context={"session_id": "opening"},
             history=[],
         )

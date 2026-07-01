@@ -8,12 +8,6 @@ pydantic-settings==2.6.1
 openai==1.57.0
 azure-identity==1.19.0
 
-# Azure AI Agents SDK (replaces raw AsyncAzureOpenAI in the orchestrator)
-# Uses the AIServices cognitiveservices endpoint + DefaultAzureCredential.
-# Fixes network routing in Italy North Container Apps and reasoning-model
-# empty-content issues with gpt-oss-120b.
-azure-ai-agents==1.1.0
-
 # MCP SDK
 mcp==1.3.0
 
