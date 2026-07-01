@@ -103,3 +103,14 @@ jobs:
             --template-file infra/main.bicep \
             --parameters "infra/environments/${ENV}.bicepparam" \
             --name "deploy-$(date +%Y%m%d%H%M%S)"
+
+      - name: Restore managed identity on Container App
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          # Bicep deploy may reset the managed identity — re-assign after every infra deploy.
+          az containerapp identity assign \
+            --name "discoveryai-ca-backend-${ENV}" \
+            --resource-group "rg-discoveryai-${ENV}" \
+            --system-assigned \
+            --output none || true
+          echo "✅ Managed identity (system-assigned) confirmed."

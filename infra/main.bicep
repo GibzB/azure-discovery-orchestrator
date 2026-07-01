@@ -11,6 +11,9 @@ param location string = resourceGroup().location
 @description('Naming prefix for all resources')
 param prefix string = 'discoveryai'
 
+@description('Container image to deploy to the backend Container App')
+param backendImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
 // ── Modules ───────────────────────────────────────────────────────────────────
 
 module monitor './modules/monitor/monitor.bicep' = {
@@ -93,6 +96,7 @@ module containerApps './modules/containerapps/containerapps.bicep' = {
     location: location
     logAnalyticsWorkspaceId: monitor.outputs.logAnalyticsWorkspaceId
     logAnalyticsSharedKey: monitor.outputs.logAnalyticsSharedKey
+    backendImage: backendImage
   }
 }
 
