@@ -207,6 +207,22 @@ stages:
                           "ENV=${{ parameters.environment }}"
 
                 - task: AzureCLI@2
+                  displayName: Ensure managed identity is enabled
+                  inputs:
+                    azureSubscription: $(serviceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      # az containerapp update --set-env-vars can silently reset identity.
+                      # Re-assign system-assigned managed identity after every deploy.
+                      az containerapp identity assign \
+                        --name $(containerAppName) \
+                        --resource-group $(resourceGroup) \
+                        --system-assigned \
+                        --output none
+                      echo "✅ Managed identity (system-assigned) confirmed."
+
+                - task: AzureCLI@2
                   displayName: Verify deployment
                   inputs:
                     azureSubscription: $(serviceConnection)

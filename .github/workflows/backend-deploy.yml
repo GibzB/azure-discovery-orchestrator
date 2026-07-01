@@ -169,6 +169,18 @@ jobs:
               "LOG_LEVEL=INFO" \
               "ENV=${ENV}"
 
+      - name: Ensure managed identity is enabled
+        run: |
+          ENV="${{ needs.build.outputs.deploy_env }}"
+          # az containerapp update --set-env-vars can silently reset the identity.
+          # Re-assign the system-assigned managed identity after every deploy.
+          az containerapp identity assign \
+            --name "discoveryai-ca-backend-${ENV}" \
+            --resource-group "rg-discoveryai-${ENV}" \
+            --system-assigned \
+            --output none
+          echo "✅ Managed identity (system-assigned) confirmed."
+
       - name: Verify deployment
         run: |
           ENV="${{ needs.build.outputs.deploy_env }}"
