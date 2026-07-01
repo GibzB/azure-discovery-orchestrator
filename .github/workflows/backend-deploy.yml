@@ -119,10 +119,6 @@ jobs:
           ENV="${{ needs.build.outputs.deploy_env }}"
           IMAGE="${{ needs.build.outputs.image_tag }}"
 
-          # Deploy image AND all required env vars together in one atomic update.
-          # This prevents the env-var wipe that happens when --image is used alone
-          # on a Container App whose env was set by a prior partial update.
-          # All sensitive values are stored as GitHub environment secrets.
           az containerapp update \
             --name "discoveryai-ca-backend-${ENV}" \
             --resource-group "rg-discoveryai-${ENV}" \
@@ -147,7 +143,7 @@ jobs:
               "STORAGE_CONNECTION_STRING=${{ secrets.STORAGE_CONNECTION_STRING }}" \
               "STORAGE_REPORTS_CONTAINER=reports" \
               "STORAGE_KNOWLEDGEBASE_CONTAINER=knowledgebase" \
-              "CORS_ORIGINS=[\"https://discoveryaiswadev.z38.web.core.windows.net\",\"http://localhost:5173\"]"
+              "CORS_ORIGINS_RAW=https://discoveryaiswadev.z38.web.core.windows.net,http://localhost:5173"
 
       - name: Verify deployment
         run: |
