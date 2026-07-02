@@ -68,7 +68,7 @@ export function useVoiceConversation({
   maxRecordingMs = 30000,
 }: UseVoiceConversationOptions) {
   const [state, setState] = useState<ConvState>('disconnected')
-  const [messages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
   const [turn, setTurn] = useState(0)
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -214,8 +214,30 @@ export function useVoiceConversation({
         try {
           const data = JSON.parse(event.data as string)
 
-          if (data.type === 'turn_end') {
+          if (data.type === 'transcript') {
+            // Transcript arrives before audio — show immediately
+            if (data.user) {
+              setMessages(prev => [...prev, { role: 'user', text: data.user }])
+            }
+            if (data.assistant) {
+              setMessages(prev => [...prev, { role: 'assistant', text: data.assistant }])
+            }
+          } else if (data.type === 'turn_end') {
             setTurn(data.turn ?? 0)
+            // Fallback: populate messages from turn_end if transcript frame was missed
+            if (data.transcript && data.response) {
+              setMessages(prev => {
+                const hasUser = prev.some(m => m.role === 'user' && m.text === data.transcript)
+                if (!hasUser) {
+                  return [
+                    ...prev,
+                    { role: 'user' as const, text: data.transcript },
+                    { role: 'assistant' as const, text: data.response },
+                  ]
+                }
+                return prev
+              })
+            }
             if (data.is_final) {
               setState('completed')
               onComplete?.()

@@ -77,13 +77,21 @@ class ConversationService:
         Kick off a new discovery session.
         Returns MP3 audio of the orchestrator's opening greeting + first question.
         """
+        audio, _ = await self.start_session_with_text(session_id)
+        return audio
+
+    async def start_session_with_text(self, session_id: str) -> tuple[bytes, str]:
+        """
+        Kick off a new discovery session.
+        Returns (MP3 audio, text) of the orchestrator's opening greeting.
+        """
         session = self.get_or_create_session(session_id)
         text = await self._agent.opening_message()
         audio = self._speech.synthesise_to_bytes(text)
         session.history.append({"role": "assistant", "content": text})
         session.turn = 1
         logger.info("[%s] Session started. Turn 1: %s", session_id, text[:80])
-        return audio
+        return audio, text
 
     # ── Regular turn (audio in → audio out) ───────────────────────────────────
 
@@ -165,9 +173,23 @@ class ConversationService:
         audio_bytes: bytes,
         audio_suffix: str = ".wav",
     ) -> AsyncGenerator[bytes, None]:
+        """Streaming version: yields sentence-level TTS audio chunks."""
+        async for item in self.stream_turn_with_text(session_id, audio_bytes, audio_suffix):
+            if not isinstance(item, tuple):
+                yield item
+
+    async def stream_turn_with_text(
+        self,
+        session_id: str,
+        audio_bytes: bytes,
+        audio_suffix: str = ".wav",
+    ) -> AsyncGenerator:
         """
-        Streaming version: yields sentence-level TTS audio chunks as they are
-        synthesised, reducing perceived latency.
+        Streaming version with transcript metadata.
+
+        Yields:
+          - (transcript: str, response_text: str)  — once, before audio, as metadata
+          - bytes                                   — audio chunks (one per sentence)
         """
         import tempfile
         import re
@@ -188,8 +210,10 @@ class ConversationService:
 
         if not transcript:
             fallback = "I'm sorry, I didn't catch that. Could you please repeat?"
+            yield ("", fallback)
             audio = self._speech.synthesise_to_bytes(fallback)
-            yield audio
+            if audio:
+                yield audio
             return
 
         session.history.append({"role": "user", "content": transcript})
@@ -199,6 +223,9 @@ class ConversationService:
             history=session.history,
         )
         session.turn += 1
+
+        # Yield metadata first so the client can show transcript immediately
+        yield (transcript, response_text)
 
         # Split into sentences and yield each as audio
         sentences = re.split(r'(?<=[.?!])\s+', response_text.strip())

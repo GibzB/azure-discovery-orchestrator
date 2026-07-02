@@ -137,7 +137,7 @@ async def voice_websocket(
 
                 if data.get("type") == "start":
                     # Kick off session — send opening greeting
-                    audio = await svc.start_session(session_id)
+                    audio, opening_text = await svc.start_session_with_text(session_id)
                     if audio:
                         await websocket.send_bytes(audio)
                     session = svc.get_or_create_session(session_id)
@@ -145,6 +145,8 @@ async def voice_websocket(
                         "type": "turn_end",
                         "is_final": False,
                         "turn": session.turn,
+                        "transcript": "",
+                        "response": opening_text,
                     }))
 
                 elif data.get("type") == "end":
@@ -161,8 +163,23 @@ async def voice_websocket(
                 session = svc.get_or_create_session(session_id)
 
                 # Stream sentence-by-sentence for lower latency
-                async for chunk in svc.stream_turn(session_id, audio_bytes, ".webm"):
-                    await websocket.send_bytes(chunk)
+                # Collect transcript and response text via a wrapper that
+                # sends a text frame first, then audio chunks, then turn_end.
+                transcript_text: str = ""
+                response_text_collected: str = ""
+
+                async for item in svc.stream_turn_with_text(session_id, audio_bytes, ".webm"):
+                    if isinstance(item, tuple):
+                        # (transcript, response_text) metadata frame — send as JSON before audio
+                        transcript_text, response_text_collected = item
+                        await websocket.send_text(json.dumps({
+                            "type": "transcript",
+                            "user": transcript_text,
+                            "assistant": response_text_collected,
+                        }))
+                    else:
+                        # bytes — audio chunk
+                        await websocket.send_bytes(item)
 
                 session = svc.get_or_create_session(session_id)
                 is_final = session.status.value == "completed"
@@ -171,6 +188,8 @@ async def voice_websocket(
                     "type": "turn_end",
                     "is_final": is_final,
                     "turn": session.turn,
+                    "transcript": transcript_text,
+                    "response": response_text_collected,
                 }))
 
                 if is_final:

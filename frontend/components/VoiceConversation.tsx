@@ -37,7 +37,11 @@ export default function VoiceConversation({ sessionId: _sessionId, onComplete }:
   const phase = Math.min(Math.floor((turn - 1) / 4), 3)
   const isSpeaking = state === 'speaking'
   const isListening = state === 'listening'
+  const isProcessing = state === 'processing'
   const isIdle = state === 'disconnected' || state === 'error'
+
+  // Always show transcript card once session starts
+  const showTranscript = isActive || messages.length > 0
 
   return (
     <>
@@ -149,20 +153,32 @@ export default function VoiceConversation({ sessionId: _sessionId, onComplete }:
         </div>
       </div>
 
-      {/* Live transcript */}
-      {messages.length > 0 && (
+      {/* Live transcript — show as soon as session starts */}
+      {showTranscript && (
         <div className="transcript-card" aria-label="Live conversation transcript">
           <div className="transcript-header">
             <span className="transcript-title">Live Transcript</span>
             {isActive && <div className="rec-dot" aria-label="Recording in progress" />}
           </div>
           <div className="transcript-body">
-            {messages.map((m, i) => (
-              <div key={i} className={`msg msg--${m.role}`}>
-                <span className="msg__role">{m.role === 'assistant' ? 'Consultant' : 'You'}</span>
-                <div className="msg__bubble">{m.text}</div>
+            {messages.length === 0 ? (
+              <div className="transcript-empty">Waiting for conversation to start…</div>
+            ) : (
+              messages.map((m, i) => (
+                <div key={i} className={`msg msg--${m.role}`}>
+                  <span className="msg__role">{m.role === 'assistant' ? 'Consultant' : 'You'}</span>
+                  <div className="msg__bubble">{m.text}</div>
+                </div>
+              ))
+            )}
+            {isProcessing && (
+              <div className="msg msg--assistant">
+                <span className="msg__role">Consultant</span>
+                <div className="msg__bubble msg__bubble--thinking">
+                  <span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" />
+                </div>
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}
