@@ -90,6 +90,19 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     environment: ${{ needs.build.outputs.deploy_env }}
+    env:
+      # All env vars passed as job-level environment variables.
+      # The deploy script reads them from the process environment — no shell quoting issues.
+      APP_ENV: ${{ needs.build.outputs.deploy_env }}
+      APP_IMAGE: ${{ needs.build.outputs.image_tag }}
+      APP_NAME: discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}
+      APP_RG: rg-discoveryai-${{ needs.build.outputs.deploy_env }}
+      SECRET_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
+      SECRET_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+      SECRET_SEARCH_KEY: ${{ secrets.SEARCH_KEY }}
+      SECRET_COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
+      SECRET_STORAGE_CONN: ${{ secrets.STORAGE_CONNECTION_STRING }}
+
     steps:
       - name: Azure Login (Workload Identity Federation)
         uses: azure/login@v2.3.0
@@ -100,91 +113,99 @@ jobs:
 
       - name: Wait for Container App to be ready
         run: |
-          ENV="${{ needs.build.outputs.deploy_env }}"
           for i in $(seq 1 18); do
-            STATE=$(az containerapp show \
-              --name "discoveryai-ca-backend-${ENV}" \
-              --resource-group "rg-discoveryai-${ENV}" \
+            STATE=$(az containerapp show --name "$APP_NAME" --resource-group "$APP_RG" \
               --query "properties.provisioningState" -o tsv 2>/dev/null)
-            echo "  Attempt $i: provisioningState=$STATE"
-            if [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ]; then break; fi
+            echo "  Attempt $i: $STATE"
+            [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ] && break
             sleep 10
           done
-          [ "$STATE" = "Succeeded" ] && echo "✅ Ready" || (echo "❌ Not ready"; exit 1)
+          [ "$STATE" = "Succeeded" ] && echo "✅ Ready" || (echo "❌ Not ready: $STATE"; exit 1)
 
-      - name: Sync secrets to Container App secret store
+      - name: Deploy image + env vars via Python (avoids shell quoting issues)
         run: |
-          ENV="${{ needs.build.outputs.deploy_env }}"
-          # Store sensitive values as Container App secrets (named refs).
-          # This runs before the env var update so secretrefs resolve correctly.
-          az containerapp secret set \
-            --name "discoveryai-ca-backend-${ENV}" \
-            --resource-group "rg-discoveryai-${ENV}" \
-            --secrets \
-              "openai-key=${{ secrets.AZURE_OPENAI_KEY }}" \
-              "speech-key=${{ secrets.AZURE_SPEECH_KEY }}" \
-              "search-key=${{ secrets.SEARCH_KEY }}" \
-              "cosmos-key=${{ secrets.COSMOS_KEY }}" \
-              "storage-conn=${{ secrets.STORAGE_CONNECTION_STRING }}"
+          pip install --quiet azure-mgmt-appcontainers azure-identity 2>/dev/null
 
-      - name: Deploy new image + env vars (secrets via secretref)
-        run: |
-          ENV="${{ needs.build.outputs.deploy_env }}"
-          IMAGE="${{ needs.build.outputs.image_tag }}"
+          python3 - << 'PYEOF'
+          import os, sys, subprocess, json
 
-          az containerapp update \
-            --name "discoveryai-ca-backend-${ENV}" \
-            --resource-group "rg-discoveryai-${ENV}" \
-            --image "$IMAGE" \
-            --set-env-vars \
-              "ENV=${ENV}" \
-              "LOG_LEVEL=INFO" \
-              "AZURE_OPENAI_ENDPOINT=https://discoveryai-aisvc-dev.openai.azure.com/" \
-              "AZURE_OPENAI_KEY=secretref:openai-key" \
-              "AZURE_OPENAI_DEPLOYMENT=gpt-oss-120b" \
-              "AZURE_OPENAI_API_VERSION=2024-12-01-preview" \
-              "AZURE_SPEECH_KEY=secretref:speech-key" \
-              "AZURE_SPEECH_REGION=italynorth" \
-              "AZURE_SPEECH_VOICE=en-US-AvaMultilingualNeural" \
-              "SEARCH_ENDPOINT=https://discoveryai-srch-dev.search.windows.net" \
-              "SEARCH_KEY=secretref:search-key" \
-              "SEARCH_INDEX=knowledgebase" \
-              "COSMOS_ENDPOINT=https://discoveryai-cosmos-dev.documents.azure.com:443/" \
-              "COSMOS_KEY=secretref:cosmos-key" \
-              "COSMOS_DATABASE=discovery" \
-              "COSMOS_CONTAINER=sessions" \
-              "STORAGE_CONNECTION_STRING=secretref:storage-conn" \
-              "STORAGE_REPORTS_CONTAINER=reports" \
-              "STORAGE_KNOWLEDGEBASE_CONTAINER=knowledgebase" \
-              "CORS_ORIGINS_RAW=https://discoveryaiswadev.z38.web.core.windows.net,http://localhost:5173"
+          app   = os.environ["APP_NAME"]
+          rg    = os.environ["APP_RG"]
+          image = os.environ["APP_IMAGE"]
+          env   = os.environ["APP_ENV"]
+
+          # Build env var list — values come from process env, never touched by shell
+          env_vars = [
+              {"name": "ENV",                           "value": env},
+              {"name": "LOG_LEVEL",                     "value": "INFO"},
+              {"name": "AZURE_OPENAI_ENDPOINT",         "value": "https://discoveryai-aisvc-dev.openai.azure.com/"},
+              {"name": "AZURE_OPENAI_KEY",              "value": os.environ["SECRET_OPENAI_KEY"]},
+              {"name": "AZURE_OPENAI_DEPLOYMENT",       "value": "gpt-oss-120b"},
+              {"name": "AZURE_OPENAI_API_VERSION",      "value": "2024-12-01-preview"},
+              {"name": "AZURE_SPEECH_KEY",              "value": os.environ["SECRET_SPEECH_KEY"]},
+              {"name": "AZURE_SPEECH_REGION",           "value": "italynorth"},
+              {"name": "AZURE_SPEECH_VOICE",            "value": "en-US-AvaMultilingualNeural"},
+              {"name": "SEARCH_ENDPOINT",               "value": "https://discoveryai-srch-dev.search.windows.net"},
+              {"name": "SEARCH_KEY",                    "value": os.environ["SECRET_SEARCH_KEY"]},
+              {"name": "SEARCH_INDEX",                  "value": "knowledgebase"},
+              {"name": "COSMOS_ENDPOINT",               "value": "https://discoveryai-cosmos-dev.documents.azure.com:443/"},
+              {"name": "COSMOS_KEY",                    "value": os.environ["SECRET_COSMOS_KEY"]},
+              {"name": "COSMOS_DATABASE",               "value": "discovery"},
+              {"name": "COSMOS_CONTAINER",              "value": "sessions"},
+              {"name": "STORAGE_CONNECTION_STRING",     "value": os.environ["SECRET_STORAGE_CONN"]},
+              {"name": "STORAGE_REPORTS_CONTAINER",     "value": "reports"},
+              {"name": "STORAGE_KNOWLEDGEBASE_CONTAINER", "value": "knowledgebase"},
+              {"name": "CORS_ORIGINS_RAW",              "value": "https://discoveryaiswadev.z38.web.core.windows.net,http://localhost:5173"},
+          ]
+
+          # Write to temp JSON file — passed via stdin to az CLI
+          import tempfile
+          with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+              json.dump(env_vars, f)
+              tmp = f.name
+
+          # Use az CLI with --set-env-vars built from the JSON (no shell expansion of values)
+          set_env_args = " ".join(
+              f'"{e["name"]}={e["value"].replace(chr(34), chr(39))}"'
+              for e in env_vars
+          )
+
+          cmd = [
+              "az", "containerapp", "update",
+              "--name", app,
+              "--resource-group", rg,
+              "--image", image,
+              "--set-env-vars",
+          ] + [f'{e["name"]}={e["value"]}' for e in env_vars]
+
+          print(f"Deploying {image} to {app} with {len(env_vars)} env vars...")
+          result = subprocess.run(cmd, capture_output=True, text=True)
+          if result.returncode != 0:
+              print("STDERR:", result.stderr[-3000:])
+              sys.exit(result.returncode)
+          out = json.loads(result.stdout)
+          print("✅ Deployed revision:", out.get("properties", {}).get("latestRevisionName", "unknown"))
+          PYEOF
 
       - name: Verify deployment
         run: |
-          ENV="${{ needs.build.outputs.deploy_env }}"
-          az containerapp show \
-            --name "discoveryai-ca-backend-${ENV}" \
-            --resource-group "rg-discoveryai-${ENV}" \
+          az containerapp show --name "$APP_NAME" --resource-group "$APP_RG" \
             --query "{fqdn:properties.configuration.ingress.fqdn, state:properties.provisioningState, image:properties.template.containers[0].image}" \
             -o table
 
       - name: Smoke test health endpoint
         run: |
-          FQDN=$(az containerapp show \
-            --name "discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}" \
-            --resource-group "rg-discoveryai-${{ needs.build.outputs.deploy_env }}" \
+          FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$APP_RG" \
             --query "properties.configuration.ingress.fqdn" -o tsv)
-          sleep 20
+          sleep 25
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "https://${FQDN}/health")
           echo "Health HTTP $STATUS"
           [ "$STATUS" = "200" ] && echo "✅ Healthy" || (echo "❌ Health check failed"; exit 1)
 
       - name: Prune old ACR images (keep latest + 2 SHAs)
         run: |
-          TAGS=$(az acr repository show-tags \
-            --name "${{ secrets.ACR_NAME }}" \
-            --repository backend \
-            --orderby time_desc \
-            --output tsv | grep -v '^latest$' | tail -n +3)
+          TAGS=$(az acr repository show-tags --name "${{ secrets.ACR_NAME }}" \
+            --repository backend --orderby time_desc --output tsv | grep -v '^latest$' | tail -n +3)
           [ -z "$TAGS" ] && echo "Nothing to prune." && exit 0
           while IFS= read -r tag; do
             az acr repository delete --name "${{ secrets.ACR_NAME }}" \
