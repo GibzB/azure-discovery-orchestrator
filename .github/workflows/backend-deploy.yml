@@ -115,20 +115,19 @@ jobs:
           done
           [ "$STATE" = "Succeeded" ] && echo "✅ Ready" || (echo "❌ Not ready: $STATE"; exit 1)
 
-      - name: Refresh ACR pull credentials on Container App
+      - name: Refresh ACR pull credentials
         run: |
           APP="discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}"
           RG="rg-discoveryai-${{ needs.build.outputs.deploy_env }}"
           ACR_PWD=$(az acr credential show --name discoveryaiacr --query "passwords[0].value" -o tsv)
           az containerapp registry set \
-            --name "$APP" \
-            --resource-group "$RG" \
+            --name "$APP" --resource-group "$RG" \
             --server "discoveryaiacr.azurecr.io" \
             --username "discoveryaiacr" \
             --password "$ACR_PWD"
           echo "✅ ACR credentials refreshed"
 
-      - name: Wait for Container App ready after registry update
+      - name: Wait again after registry update
         run: |
           APP="discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}"
           RG="rg-discoveryai-${{ needs.build.outputs.deploy_env }}"
@@ -141,45 +140,16 @@ jobs:
           done
           [ "$STATE" = "Succeeded" ] && echo "✅ Ready" || (echo "❌ Not ready: $STATE"; exit 1)
 
-      - name: Deploy new image and env vars
-        env:
-          AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
-          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
-          SEARCH_KEY: ${{ secrets.SEARCH_KEY }}
-          COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
-          STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
+      - name: Update image only
+        # Env vars are managed directly on the Container App (set via az CLI, not pipeline).
+        # Image-only update preserves all existing env vars.
         run: |
           APP="discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}"
           RG="rg-discoveryai-${{ needs.build.outputs.deploy_env }}"
-          ENV="${{ needs.build.outputs.deploy_env }}"
           IMAGE="discoveryaiacr.azurecr.io/backend:${{ needs.build.outputs.image_sha }}"
-
           az containerapp update \
-            --name "$APP" \
-            --resource-group "$RG" \
-            --image "$IMAGE" \
-            --set-env-vars \
-              "ENV=${ENV}" \
-              "LOG_LEVEL=INFO" \
-              "AZURE_OPENAI_ENDPOINT=https://discoveryai-aisvc-dev.openai.azure.com/" \
-              "AZURE_OPENAI_KEY=${AZURE_OPENAI_KEY}" \
-              "AZURE_OPENAI_DEPLOYMENT=gpt-oss-120b" \
-              "AZURE_OPENAI_API_VERSION=2024-12-01-preview" \
-              "AZURE_SPEECH_KEY=${AZURE_SPEECH_KEY}" \
-              "AZURE_SPEECH_REGION=italynorth" \
-              "AZURE_SPEECH_VOICE=en-US-AvaMultilingualNeural" \
-              "SEARCH_ENDPOINT=https://discoveryai-srch-dev.search.windows.net" \
-              "SEARCH_KEY=${SEARCH_KEY}" \
-              "SEARCH_INDEX=knowledgebase" \
-              "COSMOS_ENDPOINT=https://discoveryai-cosmos-dev.documents.azure.com:443/" \
-              "COSMOS_KEY=${COSMOS_KEY}" \
-              "COSMOS_DATABASE=discovery" \
-              "COSMOS_CONTAINER=sessions" \
-              "STORAGE_CONNECTION_STRING=${STORAGE_CONNECTION_STRING}" \
-              "STORAGE_REPORTS_CONTAINER=reports" \
-              "STORAGE_KNOWLEDGEBASE_CONTAINER=knowledgebase" \
-              "CORS_ORIGINS_RAW=https://discoveryaiswadev.z38.web.core.windows.net,http://localhost:5173"
-
+            --name "$APP" --resource-group "$RG" \
+            --image "$IMAGE"
           echo "✅ Deployed $IMAGE"
 
       - name: Verify deployment
