@@ -182,9 +182,15 @@ class OrchestratorAgent:
     name = "orchestrator"
 
     def __init__(self, mcp: MCPClientManager | None = None) -> None:
-        self._client = _build_client()
+        self._client = None  # lazy — built on first use so env vars are fully loaded
         self._mcp = mcp
         self._system_prompt = _load_system_prompt()
+
+    def _get_client(self):
+        """Lazily build the OpenAI client on first use."""
+        if self._client is None:
+            self._client = _build_client()
+        return self._client
 
     async def run(
         self,
@@ -220,6 +226,7 @@ class OrchestratorAgent:
 
         # ── Agentic loop: keep calling until no more tool_calls ───────────────
         max_rounds = 5
+        client = self._get_client()
         for round_num in range(max_rounds):
             kwargs: dict[str, Any] = {
                 "model": settings.AZURE_OPENAI_DEPLOYMENT,
@@ -234,7 +241,7 @@ class OrchestratorAgent:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
 
-            response = await self._client.chat.completions.create(**kwargs)
+            response = await client.chat.completions.create(**kwargs)
             choice = response.choices[0]
 
             # Serialise the message for history storage (handles tool_calls)

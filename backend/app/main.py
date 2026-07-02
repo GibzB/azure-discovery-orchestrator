@@ -74,10 +74,14 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/health")
 async def health_check():
     tools_available = len(_mcp.all_tools_for_openai()) if _mcp else 0
+    key_set = bool(settings.AZURE_OPENAI_KEY)
+    endpoint_set = bool(settings.AZURE_OPENAI_ENDPOINT or settings.AZURE_FOUNDRY_ENDPOINT)
     return {
         "status": "healthy",
         "service": "azure-discovery-orchestrator",
         "mcp_tools_available": tools_available,
+        "openai_key_configured": key_set,
+        "openai_endpoint_configured": endpoint_set,
     }
 
 
