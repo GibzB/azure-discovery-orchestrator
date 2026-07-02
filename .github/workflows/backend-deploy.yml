@@ -142,6 +142,19 @@ jobs:
           with open("/tmp/ca_current.json") as f:
               ca = json.load(f)
 
+          # Strip read-only/system fields that az containerapp update --yaml rejects
+          for key in ("id", "name", "type", "location", "systemData", "resourceGroup",
+                      "customDomainVerificationId", "delegatedIdentities"):
+              ca.pop(key, None)
+          props = ca.get("properties", {})
+          for key in ("provisioningState", "runningStatus", "latestRevisionName",
+                      "latestReadyRevisionName", "latestRevisionFqdn", "eventStreamEndpoint",
+                      "outboundIpAddresses", "managedEnvironmentId", "environmentId",
+                      "workloadProfileName"):
+              props.pop(key, None)
+          # Strip identity block — managed identity is configured separately
+          ca.pop("identity", None)
+
           env_vars = [
               {"name": "ENV",                             "value": os.environ["APP_ENV"]},
               {"name": "LOG_LEVEL",                       "value": "INFO"},
