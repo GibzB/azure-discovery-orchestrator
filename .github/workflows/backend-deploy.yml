@@ -106,12 +106,14 @@ jobs:
         run: |
           APP="discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}"
           RG="rg-discoveryai-${{ needs.build.outputs.deploy_env }}"
-          for i in $(seq 1 18); do
+          echo "Waiting for any in-progress operation to clear..."
+          for i in $(seq 1 30); do
             STATE=$(az containerapp show --name "$APP" --resource-group "$RG" \
-              --query "properties.provisioningState" -o tsv 2>/dev/null)
-            echo "  Attempt $i: $STATE"
-            [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ] && break
-            sleep 10
+              --query "properties.provisioningState" -o tsv 2>/dev/null || echo "Unknown")
+            echo "  Attempt $i/30: $STATE"
+            [ "$STATE" = "Succeeded" ] && break
+            [ "$STATE" = "Failed" ] && break
+            sleep 15
           done
           [ "$STATE" = "Succeeded" ] && echo "✅ Ready" || (echo "❌ Not ready: $STATE"; exit 1)
 
@@ -131,12 +133,14 @@ jobs:
         run: |
           APP="discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}"
           RG="rg-discoveryai-${{ needs.build.outputs.deploy_env }}"
-          for i in $(seq 1 12); do
+          echo "Waiting for registry update to settle..."
+          for i in $(seq 1 20); do
             STATE=$(az containerapp show --name "$APP" --resource-group "$RG" \
-              --query "properties.provisioningState" -o tsv 2>/dev/null)
-            echo "  Attempt $i: $STATE"
-            [ "$STATE" = "Succeeded" ] || [ "$STATE" = "Failed" ] && break
-            sleep 10
+              --query "properties.provisioningState" -o tsv 2>/dev/null || echo "Unknown")
+            echo "  Attempt $i/20: $STATE"
+            [ "$STATE" = "Succeeded" ] && break
+            [ "$STATE" = "Failed" ] && break
+            sleep 15
           done
           [ "$STATE" = "Succeeded" ] && echo "✅ Ready" || (echo "❌ Not ready: $STATE"; exit 1)
 
@@ -147,10 +151,24 @@ jobs:
           APP="discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}"
           RG="rg-discoveryai-${{ needs.build.outputs.deploy_env }}"
           IMAGE="discoveryaiacr.azurecr.io/backend:${{ needs.build.outputs.image_sha }}"
-          az containerapp update \
-            --name "$APP" --resource-group "$RG" \
-            --image "$IMAGE"
-          echo "✅ Deployed $IMAGE"
+
+          # Retry up to 5 times — ContainerAppOperationInProgress clears in <60s
+          for attempt in 1 2 3 4 5; do
+            echo "Deploy attempt $attempt/5..."
+            if az containerapp update \
+              --name "$APP" --resource-group "$RG" \
+              --image "$IMAGE" 2>&1; then
+              echo "✅ Deployed $IMAGE"
+              break
+            else
+              if [ "$attempt" = "5" ]; then
+                echo "❌ All deploy attempts failed"
+                exit 1
+              fi
+              echo "⏳ Operation in progress — waiting 30s before retry..."
+              sleep 30
+            fi
+          done
 
       - name: Verify deployment
         run: |
