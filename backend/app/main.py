@@ -174,7 +174,3 @@ async def connectivity_check(
         "chat_probe_included": include_chat,
         "probes": results,
     }
-        "deployment": deployment,
-        "key_set": bool(key),
-        "probes": results,
-    }
