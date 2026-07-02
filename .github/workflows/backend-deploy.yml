@@ -58,7 +58,7 @@ jobs:
     needs: test
     environment: ${{ github.event.inputs.environment || 'dev' }}
     outputs:
-      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_sha: ${{ steps.meta.outputs.image_sha }}
       deploy_env: ${{ steps.meta.outputs.deploy_env }}
 
     steps:
@@ -78,11 +78,13 @@ jobs:
         id: meta
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"
-          TAG="${{ secrets.ACR_LOGIN_SERVER }}/backend:${{ github.sha }}"
+          SHA="${{ github.sha }}"
+          TAG="${{ secrets.ACR_LOGIN_SERVER }}/backend:${SHA}"
           docker build -t "$TAG" -t "${{ secrets.ACR_LOGIN_SERVER }}/backend:latest" ./backend
           docker push "$TAG"
           docker push "${{ secrets.ACR_LOGIN_SERVER }}/backend:latest"
-          echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
+          # Pass only the SHA — deploy job reconstructs the full tag to avoid GitHub masking
+          echo "image_sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "deploy_env=$ENV" >> "$GITHUB_OUTPUT"
 
   deploy:
@@ -94,7 +96,7 @@ jobs:
       # All env vars passed as job-level environment variables.
       # The deploy script reads them from the process environment — no shell quoting issues.
       APP_ENV: ${{ needs.build.outputs.deploy_env }}
-      APP_IMAGE: ${{ needs.build.outputs.image_tag }}
+      APP_IMAGE: ${{ secrets.ACR_LOGIN_SERVER }}/backend:${{ needs.build.outputs.image_sha }}
       APP_NAME: discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}
       APP_RG: rg-discoveryai-${{ needs.build.outputs.deploy_env }}
       SECRET_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
