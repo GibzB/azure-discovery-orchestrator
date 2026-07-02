@@ -10,6 +10,36 @@ param logAnalyticsSharedKey string
 @description('Container image to deploy — override in pipeline after build')
 param backendImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
+// ── App configuration params (set in bicepparam / pipeline) ──────────────────
+param azureOpenAiEndpoint string = ''
+@secure()
+param azureOpenAiKey string = ''
+param azureOpenAiDeployment string = 'gpt-oss-120b'
+param azureOpenAiApiVersion string = '2024-12-01-preview'
+
+@secure()
+param azureSpeechKey string = ''
+param azureSpeechRegion string = 'italynorth'
+param azureSpeechVoice string = 'en-US-AvaMultilingualNeural'
+
+param searchEndpoint string = ''
+@secure()
+param searchKey string = ''
+param searchIndex string = 'knowledgebase'
+
+param cosmosEndpoint string = ''
+@secure()
+param cosmosKey string = ''
+param cosmosDatabase string = 'discovery'
+param cosmosContainer string = 'sessions'
+
+@secure()
+param storageConnectionString string = ''
+param storageReportsContainer string = 'reports'
+param storageKnowledgebaseContainer string = 'knowledgebase'
+
+param corsOriginsRaw string = 'http://localhost:5173'
+
 var caeName = '${prefix}-cae-${env}'
 var caName = '${prefix}-ca-backend-${env}'
 
@@ -30,6 +60,9 @@ resource containerAppsEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
 resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: caName
   location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     managedEnvironmentId: containerAppsEnv.id
     configuration: {
@@ -39,7 +72,6 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
         transport: 'http'
         allowInsecure: false
       }
-      // Secrets are referenced from Key Vault at runtime via env vars
     }
     template: {
       containers: [
@@ -51,14 +83,26 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
             memory: '1Gi'
           }
           env: [
-            {
-              name: 'ENV'
-              value: env
-            }
-            {
-              name: 'LOG_LEVEL'
-              value: env == 'prod' ? 'WARNING' : 'INFO'
-            }
+            { name: 'ENV',                             value: env }
+            { name: 'LOG_LEVEL',                       value: env == 'prod' ? 'WARNING' : 'INFO' }
+            { name: 'AZURE_OPENAI_ENDPOINT',           value: azureOpenAiEndpoint }
+            { name: 'AZURE_OPENAI_KEY',                value: azureOpenAiKey }
+            { name: 'AZURE_OPENAI_DEPLOYMENT',         value: azureOpenAiDeployment }
+            { name: 'AZURE_OPENAI_API_VERSION',        value: azureOpenAiApiVersion }
+            { name: 'AZURE_SPEECH_KEY',                value: azureSpeechKey }
+            { name: 'AZURE_SPEECH_REGION',             value: azureSpeechRegion }
+            { name: 'AZURE_SPEECH_VOICE',              value: azureSpeechVoice }
+            { name: 'SEARCH_ENDPOINT',                 value: searchEndpoint }
+            { name: 'SEARCH_KEY',                      value: searchKey }
+            { name: 'SEARCH_INDEX',                    value: searchIndex }
+            { name: 'COSMOS_ENDPOINT',                 value: cosmosEndpoint }
+            { name: 'COSMOS_KEY',                      value: cosmosKey }
+            { name: 'COSMOS_DATABASE',                 value: cosmosDatabase }
+            { name: 'COSMOS_CONTAINER',                value: cosmosContainer }
+            { name: 'STORAGE_CONNECTION_STRING',       value: storageConnectionString }
+            { name: 'STORAGE_REPORTS_CONTAINER',       value: storageReportsContainer }
+            { name: 'STORAGE_KNOWLEDGEBASE_CONTAINER', value: storageKnowledgebaseContainer }
+            { name: 'CORS_ORIGINS_RAW',                value: corsOriginsRaw }
           ]
         }
       ]
@@ -84,3 +128,4 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
 output environmentId string = containerAppsEnv.id
 output fqdn string = backendApp.properties.configuration.ingress.fqdn
 output containerAppName string = backendApp.name
+output principalId string = backendApp.identity.principalId

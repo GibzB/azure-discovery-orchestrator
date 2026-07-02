@@ -14,6 +14,18 @@ param prefix string = 'discoveryai'
 @description('Container image to deploy to the backend Container App')
 param backendImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
+// ── Secure runtime secrets ────────────────────────────────────────────────────
+@secure()
+param azureOpenAiKey string = ''
+@secure()
+param azureSpeechKey string = ''
+@secure()
+param searchKey string = ''
+@secure()
+param cosmosKey string = ''
+@secure()
+param storageConnectionString string = ''
+
 // ── Modules ───────────────────────────────────────────────────────────────────
 
 module monitor './modules/monitor/monitor.bicep' = {
@@ -97,6 +109,15 @@ module containerApps './modules/containerapps/containerapps.bicep' = {
     logAnalyticsWorkspaceId: monitor.outputs.logAnalyticsWorkspaceId
     logAnalyticsSharedKey: monitor.outputs.logAnalyticsSharedKey
     backendImage: backendImage
+    azureOpenAiEndpoint: 'https://discoveryai-aisvc-dev.openai.azure.com/'
+    azureOpenAiKey: azureOpenAiKey
+    azureSpeechKey: azureSpeechKey
+    searchEndpoint: aiSearch.outputs.endpoint
+    searchKey: searchKey
+    cosmosEndpoint: cosmos.outputs.endpoint
+    cosmosKey: cosmosKey
+    storageConnectionString: storageConnectionString
+    corsOriginsRaw: 'https://discoveryaiswadev.z38.web.core.windows.net,http://localhost:5173'
   }
 }
 

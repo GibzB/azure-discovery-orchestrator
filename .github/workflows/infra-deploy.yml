@@ -3,6 +3,9 @@ name: Deploy Infrastructure
 on:
   push:
     branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra-deploy.yml'
   workflow_dispatch:
     inputs:
       environment:
@@ -96,12 +99,24 @@ jobs:
           done
 
       - name: Deploy Bicep
+        env:
+          AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          SEARCH_KEY: ${{ secrets.SEARCH_KEY }}
+          COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
+          STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           az deployment group create \
             --resource-group "rg-discoveryai-${ENV}" \
             --template-file infra/main.bicep \
             --parameters "infra/environments/${ENV}.bicepparam" \
+            --parameters \
+              azureOpenAiKey="$AZURE_OPENAI_KEY" \
+              azureSpeechKey="$AZURE_SPEECH_KEY" \
+              searchKey="$SEARCH_KEY" \
+              cosmosKey="$COSMOS_KEY" \
+              storageConnectionString="$STORAGE_CONNECTION_STRING" \
             --name "deploy-$(date +%Y%m%d%H%M%S)"
 
       - name: Restore managed identity on Container App
