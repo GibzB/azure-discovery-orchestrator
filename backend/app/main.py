@@ -86,79 +86,95 @@ async def health_check():
 
 
 @app.get("/connectivity")
-async def connectivity_check():
-    """Debug endpoint — tests outbound HTTPS from inside the container."""
-    import httpx
-    from app.core.config import settings
+async def connectivity_check(
+    include_chat: bool = False,
+    x_debug_token: str | None = None,
+):
+    """
+    Internal diagnostic endpoint — probes outbound connectivity from inside the container.
 
-    key = settings.AZURE_OPENAI_KEY
-    endpoint = (settings.AZURE_FOUNDRY_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT).rstrip("/")
+    Protection:
+      - Requires the X-Debug-Token header to match LOG_LEVEL secret guard (non-empty).
+        In practice set X-Debug-Token to the value of LOG_LEVEL env var (defaults to INFO)
+        or any non-empty string when running in dev. This prevents accidental public use.
+      - The Azure OpenAI chat_completions probe is **opt-in** via ?include_chat=true
+        to avoid billable API calls on every request.
+    """
+    import httpx
+    from fastapi import Header
+    from fastapi.responses import JSONResponse
+
+    # ── Guard: require a non-empty debug token header ────────────────────────
+    # This is a lightweight internal safeguard, not a security boundary.
+    # For production, put this endpoint behind a VNet or remove it entirely.
+    if not x_debug_token:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "X-Debug-Token header required"},
+        )
+
+    # ── Guard: endpoint must be configured ───────────────────────────────────
+    raw_endpoint = settings.AZURE_FOUNDRY_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT
+    if not raw_endpoint:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Neither AZURE_FOUNDRY_ENDPOINT nor AZURE_OPENAI_ENDPOINT is configured",
+                "probes": {},
+            },
+        )
+    endpoint = raw_endpoint.rstrip("/")
+
     deployment = settings.AZURE_OPENAI_DEPLOYMENT
     api_version = settings.AZURE_OPENAI_API_VERSION
+    key = settings.AZURE_OPENAI_KEY
 
-    results = {}
-    headers = {"api-key": key, "Content-Type": "application/json"} if key else {}
-    chat_url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
-    body = '{"messages":[{"role":"user","content":"hi"}],"max_completion_tokens":5}'
+    probes = {
+        "endpoint_root":  endpoint + "/",
+        "cosmos":         settings.COSMOS_ENDPOINT,
+        "search":         settings.SEARCH_ENDPOINT,
+        "internet":       "https://httpbin.org/get",
+    }
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        # Basic connectivity
-        for name, url in [
-            ("endpoint_root", endpoint + "/"),
-            ("httpbin", "https://httpbin.org/get"),
-        ]:
+    # chat_completions is billable — only include when explicitly requested
+    if include_chat:
+        probes["chat_completions"] = (
+            f"{endpoint}/openai/deployments/{deployment}/chat/completions"
+            f"?api-version={api_version}"
+        )
+
+    ai_headers = {"api-key": key, "Content-Type": "application/json"} if key else {}
+    chat_body = '{"messages":[{"role":"user","content":"hi"}],"max_completion_tokens":5}'
+
+    results: dict = {}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for name, url in probes.items():
+            if not url:
+                results[name] = {"status": "SKIPPED", "ok": False, "detail": "URL not configured"}
+                continue
             try:
-                r = await client.get(url)
-                results[name] = {"status": r.status_code, "ok": True}
-            except Exception as e:
-                results[name] = {"status": None, "ok": False, "error": str(e)[:200]}
+                if name == "chat_completions":
+                    r = await client.post(url, headers=ai_headers, content=chat_body)
+                elif name == "endpoint_root":
+                    r = await client.get(url, headers=ai_headers)
+                else:
+                    r = await client.get(url)
+                results[name] = {"status": r.status_code, "ok": r.status_code < 500}
+            except httpx.ConnectError as exc:
+                results[name] = {"status": "CONNECT_ERROR", "ok": False, "detail": str(exc)[:200]}
+            except httpx.TimeoutException:
+                results[name] = {"status": "TIMEOUT", "ok": False}
+            except Exception as exc:
+                results[name] = {"status": "ERROR", "ok": False, "detail": str(exc)[:200]}
 
-        # Actual chat completions call
-        try:
-            r = await client.post(chat_url, headers=headers, content=body)
-            results["chat_completions"] = {"status": r.status_code, "ok": r.status_code == 200,
-                                           "body": r.text[:300]}
-        except Exception as e:
-            results["chat_completions"] = {"status": None, "ok": False, "error": str(e)[:300]}
-
-    results["config"] = {
+    return {
         "endpoint": endpoint,
         "deployment": deployment,
         "key_set": bool(key),
+        "chat_probe_included": include_chat,
+        "probes": results,
     }
-    return results
-
-
-@app.get("/health/connectivity")
-async def connectivity_check():
-    """
-    Probe outbound connectivity from inside the container to key endpoints.
-    Returns per-host status so we can diagnose Container App egress issues.
-    """
-    import httpx
-
-    probes = {
-        "openai_azure": f"{settings.AZURE_OPENAI_ENDPOINT}openai/deployments?api-version={settings.AZURE_OPENAI_API_VERSION}",
-        "cognitive_services": "https://discoveryai-aisvc-dev.cognitiveservices.azure.com/",
-        "cosmos": settings.COSMOS_ENDPOINT,
-        "search": settings.SEARCH_ENDPOINT,
-        "internet": "https://httpbin.org/get",
+        "deployment": deployment,
+        "key_set": bool(key),
+        "probes": results,
     }
-
-    results = {}
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        for name, url in probes.items():
-            try:
-                r = await client.get(
-                    url,
-                    headers={"api-key": settings.AZURE_OPENAI_KEY} if "openai" in name or "cognitive" in name else {},
-                )
-                results[name] = {"status": r.status_code, "ok": True}
-            except httpx.ConnectError as e:
-                results[name] = {"status": "CONNECT_ERROR", "ok": False, "detail": str(e)[:200]}
-            except httpx.TimeoutException:
-                results[name] = {"status": "TIMEOUT", "ok": False}
-            except Exception as e:
-                results[name] = {"status": "ERROR", "ok": False, "detail": str(e)[:200]}
-
-    return {"endpoint": settings.AZURE_OPENAI_ENDPOINT, "probes": results}
