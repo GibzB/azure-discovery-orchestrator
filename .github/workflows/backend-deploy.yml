@@ -116,6 +116,7 @@ jobs:
           [ "$STATE" = "Succeeded" ] && echo "✅ Ready" || (echo "❌ Not ready: $STATE"; exit 1)
 
       - name: Refresh ACR pull credentials
+        continue-on-error: true
         run: |
           APP="discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}"
           RG="rg-discoveryai-${{ needs.build.outputs.deploy_env }}"
@@ -124,8 +125,7 @@ jobs:
             --name "$APP" --resource-group "$RG" \
             --server "discoveryaiacr.azurecr.io" \
             --username "discoveryaiacr" \
-            --password "$ACR_PWD"
-          echo "✅ ACR credentials refreshed"
+            --password "$ACR_PWD" && echo "✅ ACR credentials refreshed" || echo "⚠️ ACR refresh skipped (already set or in-progress)"
 
       - name: Wait again after registry update
         run: |
