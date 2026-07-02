@@ -89,19 +89,43 @@ async def health_check():
 async def connectivity_check():
     """Debug endpoint — tests outbound HTTPS from inside the container."""
     import httpx
+    from app.core.config import settings
+
+    key = settings.AZURE_OPENAI_KEY
+    endpoint = (settings.AZURE_FOUNDRY_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT).rstrip("/")
+    deployment = settings.AZURE_OPENAI_DEPLOYMENT
+    api_version = settings.AZURE_OPENAI_API_VERSION
+
     results = {}
-    urls = [
-        ("openai_azure",     "https://discoveryai-aisvc-dev.openai.azure.com/"),
-        ("cognitiveservices","https://discoveryai-aisvc-dev.cognitiveservices.azure.com/"),
-        ("httpbin",          "https://httpbin.org/get"),
-    ]
-    async with httpx.AsyncClient(timeout=10) as client:
-        for name, url in urls:
+    headers = {"api-key": key, "Content-Type": "application/json"} if key else {}
+    chat_url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+    body = '{"messages":[{"role":"user","content":"hi"}],"max_completion_tokens":5}'
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        # Basic connectivity
+        for name, url in [
+            ("endpoint_root", endpoint + "/"),
+            ("httpbin", "https://httpbin.org/get"),
+        ]:
             try:
                 r = await client.get(url)
                 results[name] = {"status": r.status_code, "ok": True}
             except Exception as e:
                 results[name] = {"status": None, "ok": False, "error": str(e)[:200]}
+
+        # Actual chat completions call
+        try:
+            r = await client.post(chat_url, headers=headers, content=body)
+            results["chat_completions"] = {"status": r.status_code, "ok": r.status_code == 200,
+                                           "body": r.text[:300]}
+        except Exception as e:
+            results["chat_completions"] = {"status": None, "ok": False, "error": str(e)[:300]}
+
+    results["config"] = {
+        "endpoint": endpoint,
+        "deployment": deployment,
+        "key_set": bool(key),
+    }
     return results
 
 
