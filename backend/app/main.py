@@ -81,6 +81,26 @@ async def health_check():
     }
 
 
+@app.get("/connectivity")
+async def connectivity_check():
+    """Debug endpoint — tests outbound HTTPS from inside the container."""
+    import httpx
+    results = {}
+    urls = [
+        ("openai_azure",     "https://discoveryai-aisvc-dev.openai.azure.com/"),
+        ("cognitiveservices","https://discoveryai-aisvc-dev.cognitiveservices.azure.com/"),
+        ("httpbin",          "https://httpbin.org/get"),
+    ]
+    async with httpx.AsyncClient(timeout=10) as client:
+        for name, url in urls:
+            try:
+                r = await client.get(url)
+                results[name] = {"status": r.status_code, "ok": True}
+            except Exception as e:
+                results[name] = {"status": None, "ok": False, "error": str(e)[:200]}
+    return results
+
+
 @app.get("/health/connectivity")
 async def connectivity_check():
     """
