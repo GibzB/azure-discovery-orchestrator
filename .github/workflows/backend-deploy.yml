@@ -72,18 +72,18 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Log in to ACR
-        run: az acr login --name ${{ secrets.ACR_NAME }}
+        run: az acr login --name discoveryaiacr
 
       - name: Build & push
         id: meta
         run: |
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           SHA="${{ github.sha }}"
-          TAG="${{ secrets.ACR_LOGIN_SERVER }}/backend:${SHA}"
-          docker build -t "$TAG" -t "${{ secrets.ACR_LOGIN_SERVER }}/backend:latest" ./backend
+          TAG="discoveryaiacr.azurecr.io/backend:${SHA}"
+          docker build -t "$TAG" -t "discoveryaiacr.azurecr.io/backend:latest" ./backend
           docker push "$TAG"
-          docker push "${{ secrets.ACR_LOGIN_SERVER }}/backend:latest"
-          # Pass only the SHA — deploy job reconstructs the full tag to avoid GitHub masking
+          docker push "discoveryaiacr.azurecr.io/backend:latest"
+          # Output only the SHA — full image name is reconstructed in deploy job
           echo "image_sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "deploy_env=$ENV" >> "$GITHUB_OUTPUT"
 
@@ -96,7 +96,7 @@ jobs:
       # All env vars passed as job-level environment variables.
       # The deploy script reads them from the process environment — no shell quoting issues.
       APP_ENV: ${{ needs.build.outputs.deploy_env }}
-      APP_IMAGE: ${{ secrets.ACR_LOGIN_SERVER }}/backend:${{ needs.build.outputs.image_sha }}
+      APP_IMAGE: discoveryaiacr.azurecr.io/backend:${{ needs.build.outputs.image_sha }}
       APP_NAME: discoveryai-ca-backend-${{ needs.build.outputs.deploy_env }}
       APP_RG: rg-discoveryai-${{ needs.build.outputs.deploy_env }}
       SECRET_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY }}
@@ -206,11 +206,11 @@ jobs:
 
       - name: Prune old ACR images (keep latest + 2 SHAs)
         run: |
-          TAGS=$(az acr repository show-tags --name "${{ secrets.ACR_NAME }}" \
+          TAGS=$(az acr repository show-tags --name "discoveryaiacr" \
             --repository backend --orderby time_desc --output tsv | grep -v '^latest$' | tail -n +3)
           [ -z "$TAGS" ] && echo "Nothing to prune." && exit 0
           while IFS= read -r tag; do
-            az acr repository delete --name "${{ secrets.ACR_NAME }}" \
+            az acr repository delete --name "discoveryaiacr" \
               --image "backend:${tag}" --yes 2>/dev/null \
               && echo "  deleted: $tag" || echo "  skip: $tag"
           done <<< "$TAGS"
